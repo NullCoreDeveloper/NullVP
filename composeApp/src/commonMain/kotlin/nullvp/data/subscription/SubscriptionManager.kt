@@ -78,7 +78,8 @@ class SubscriptionManager(
                 expireTimestamp = expire
             )
 
-            Pair(subscription, profiles)
+            val cleanedProfiles = nullvp.data.store.AppStateStore.deduplicateVkProfiles(profiles)
+            Pair(subscription, cleanedProfiles)
         }
     }
 

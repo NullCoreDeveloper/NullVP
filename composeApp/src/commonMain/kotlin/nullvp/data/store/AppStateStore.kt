@@ -4,7 +4,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.*
 import nullvp.domain.model.AppSettings
 import nullvp.domain.model.CustomRoutingRule
 import nullvp.domain.model.OperationMode
@@ -71,12 +71,74 @@ object AppStateStore {
         if (!savedJson.isNullOrBlank()) {
             runCatching {
                 val loaded = jsonSerializer.decodeFromString(SavedAppState.serializer(), savedJson)
-                _profiles.value = loaded.profiles
+                val cleanedProfiles = deduplicateVkProfiles(loaded.profiles)
+                _profiles.value = cleanedProfiles
                 _subscriptions.value = loaded.subscriptions
-                _selectedProfileId.value = loaded.selectedProfileId ?: loaded.profiles.firstOrNull()?.id
+                _selectedProfileId.value = if (cleanedProfiles.any { it.id == loaded.selectedProfileId }) loaded.selectedProfileId else cleanedProfiles.firstOrNull()?.id
                 _settings.value = loaded.settings
+                if (cleanedProfiles.size != loaded.profiles.size) {
+                    saveState()
+                }
             }
         }
+    }
+
+    fun deduplicateVkProfiles(profiles: List<Profile>): List<Profile> {
+        val result = mutableListOf<Profile>()
+        val seenEndpoints = mutableMapOf<String, Profile>()
+
+        for (profile in profiles) {
+            if (profile.protocolType == ProtocolType.VK_TURN) {
+                var vkLink = ""
+                var hasSecretKey = false
+                var hasWgConf = false
+                var hasFreeturnProp = false
+
+                runCatching {
+                    val obj = Json.parseToJsonElement(profile.protocolRawConfig).jsonObject
+                    vkLink = obj["vkLink"]?.jsonPrimitive?.contentOrNull
+                        ?: obj["vk"]?.jsonPrimitive?.contentOrNull
+                        ?: ""
+                    hasSecretKey = obj.containsKey("secretKey")
+                    hasWgConf = obj.containsKey("wgConf")
+                    hasFreeturnProp = obj.containsKey("freeturn")
+                }
+
+                val endpointKey = if (vkLink.isNotBlank()) {
+                    "vk_$vkLink"
+                } else {
+                    "addr_${profile.serverAddress}:${profile.serverPort}_${profile.name}"
+                }
+
+                val existing = seenEndpoints[endpointKey]
+                if (existing != null) {
+                    val existingHasKeys = existing.protocolRawConfig.contains("secretKey") ||
+                            existing.protocolRawConfig.contains("wgConf") ||
+                            existing.protocolRawConfig.contains("freeturn")
+                    val currentHasKeys = hasSecretKey || hasWgConf || hasFreeturnProp
+
+                    if (currentHasKeys && !existingHasKeys) {
+                        val idx = result.indexOf(existing)
+                        if (idx != -1) {
+                            result[idx] = profile
+                        }
+                        seenEndpoints[endpointKey] = profile
+                    } else if (profile.protocolRawConfig.length > existing.protocolRawConfig.length && !existingHasKeys) {
+                        val idx = result.indexOf(existing)
+                        if (idx != -1) {
+                            result[idx] = profile
+                        }
+                        seenEndpoints[endpointKey] = profile
+                    }
+                } else {
+                    seenEndpoints[endpointKey] = profile
+                    result.add(profile)
+                }
+            } else {
+                result.add(profile)
+            }
+        }
+        return result
     }
 
     private fun saveState() {
@@ -155,7 +217,8 @@ object AppStateStore {
         val otherProfiles = _profiles.value.filter { it.subscriptionId != sub.id }.toMutableList()
         val existingIds = otherProfiles.map { it.id }.toMutableSet()
 
-        val deduplicatedProfiles = newProfiles.mapIndexed { idx, p ->
+        val cleanedNew = deduplicateVkProfiles(newProfiles)
+        val deduplicatedProfiles = cleanedNew.mapIndexed { idx, p ->
             var candidateId = "${p.id}_${idx}"
             while (existingIds.contains(candidateId)) {
                 candidateId = "${p.id}_${idx}_${System.nanoTime().toString(36)}"

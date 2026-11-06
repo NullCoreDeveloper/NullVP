@@ -4,6 +4,7 @@ import kotlinx.serialization.json.*
 import nullvp.domain.model.AppSettings
 import nullvp.domain.model.Profile
 import nullvp.domain.model.ProtocolType
+import java.net.URLDecoder
 
 object RealXrayConfigBuilder {
     private val json = Json { prettyPrint = true }
@@ -15,15 +16,45 @@ object RealXrayConfigBuilder {
                 put("loglevel", "warning")
             }
 
-            // 2. Inbounds (Mixed SOCKS5/HTTP on 10808 + HTTP on 10809)
+            // 2. Stats and API configuration for real network stats polling
+            putJsonObject("stats") {}
+
+            putJsonObject("api") {
+                put("tag", "api")
+                putJsonArray("services") {
+                    add("StatsService")
+                }
+            }
+
+            putJsonObject("policy") {
+                putJsonObject("system") {
+                    put("statsInboundUplink", true)
+                    put("statsInboundDownlink", true)
+                    put("statsOutboundUplink", true)
+                    put("statsOutboundDownlink", true)
+                }
+            }
+
+            // 3. Inbounds (Mixed SOCKS5/HTTP on socksPort + HTTP on httpPort + API on 10085)
             putJsonArray("inbounds") {
+                // SOCKS5 / Mixed Inbound
                 addJsonObject {
                     put("tag", "socks-in")
                     put("port", settings.socksPort)
                     put("listen", if (settings.allowLan) "0.0.0.0" else "127.0.0.1")
                     put("protocol", "mixed")
                     putJsonObject("settings") {
-                        put("auth", "noauth")
+                        if (settings.proxyAuthEnabled && settings.proxyUsername.isNotBlank()) {
+                            put("auth", "password")
+                            putJsonArray("accounts") {
+                                addJsonObject {
+                                    put("user", settings.proxyUsername)
+                                    put("pass", settings.proxyPassword)
+                                }
+                            }
+                        } else {
+                            put("auth", "noauth")
+                        }
                         put("udp", true)
                     }
                     if (settings.sniffingEnabled) {
@@ -39,16 +70,37 @@ object RealXrayConfigBuilder {
                     }
                 }
 
+                // HTTP Inbound
                 addJsonObject {
                     put("tag", "http-in")
                     put("port", settings.httpPort)
                     put("listen", if (settings.allowLan) "0.0.0.0" else "127.0.0.1")
                     put("protocol", "mixed")
-                    putJsonObject("settings") {}
+                    putJsonObject("settings") {
+                        if (settings.proxyAuthEnabled && settings.proxyUsername.isNotBlank()) {
+                            putJsonArray("accounts") {
+                                addJsonObject {
+                                    put("user", settings.proxyUsername)
+                                    put("pass", settings.proxyPassword)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // API Inbound for statsquery
+                addJsonObject {
+                    put("tag", "api")
+                    put("port", 10085)
+                    put("listen", "127.0.0.1")
+                    put("protocol", "dokodemo-door")
+                    putJsonObject("settings") {
+                        put("address", "127.0.0.1")
+                    }
                 }
             }
 
-            // 3. Outbounds (Proxy, Direct, Block)
+            // 4. Outbounds (Proxy, Direct, Block)
             putJsonArray("outbounds") {
                 add(buildProxyOutbound(profile, settings, localRelayPort))
 
@@ -67,7 +119,7 @@ object RealXrayConfigBuilder {
                 }
             }
 
-            // 4. DNS configuration
+            // 5. DNS configuration
             putJsonObject("dns") {
                 putJsonArray("servers") {
                     add(settings.remoteDns)
@@ -76,10 +128,19 @@ object RealXrayConfigBuilder {
                 }
             }
 
-            // 5. Routing rules
+            // 6. Routing rules
             putJsonObject("routing") {
                 put("domainStrategy", "IPIfNonMatch")
                 putJsonArray("rules") {
+                    // API stats route
+                    addJsonObject {
+                        put("type", "field")
+                        putJsonArray("inboundTag") {
+                            add("api")
+                        }
+                        put("outboundTag", "api")
+                    }
+
                     // Block Ads
                     if (settings.blockAds) {
                         addJsonObject {
@@ -161,11 +222,43 @@ object RealXrayConfigBuilder {
         return json.encodeToString(JsonObject.serializer(), root)
     }
 
+    private fun extractParams(rawConfig: String): Map<String, String> {
+        val params = mutableMapOf<String, String>()
+        val rawJson = runCatching {
+            Json.parseToJsonElement(rawConfig).jsonObject
+        }.getOrNull() ?: return params
+
+        // 1. Parse query string if present
+        rawJson["query"]?.jsonPrimitive?.contentOrNull?.let { queryStr ->
+            if (queryStr.isNotBlank()) {
+                queryStr.split('&').forEach { pair ->
+                    val idx = pair.indexOf('=')
+                    if (idx > 0) {
+                        val key = pair.substring(0, idx)
+                        val rawVal = pair.substring(idx + 1)
+                        val value = runCatching { URLDecoder.decode(rawVal, "UTF-8") }.getOrDefault(rawVal)
+                        params[key] = value
+                    }
+                }
+            }
+        }
+
+        // 2. Overlay direct JSON fields
+        rawJson.forEach { (k, v) ->
+            if (k != "query") {
+                if (v is JsonPrimitive && v.contentOrNull != null) {
+                    params[k] = v.content
+                } else {
+                    params[k] = v.toString()
+                }
+            }
+        }
+
+        return params
+    }
+
     private fun buildProxyOutbound(profile: Profile, settings: AppSettings, localRelayPort: Int = 10815): JsonObject {
-        // Try parsing protocol raw config as JSON if available
-        val rawJson: JsonObject? = runCatching {
-            Json.parseToJsonElement(profile.protocolRawConfig).jsonObject
-        }.getOrNull()
+        val params = extractParams(profile.protocolRawConfig)
 
         return buildJsonObject {
             put("tag", "proxy")
@@ -180,9 +273,12 @@ object RealXrayConfigBuilder {
                                 put("port", profile.serverPort)
                                 putJsonArray("users") {
                                     addJsonObject {
-                                        put("id", rawJson?.get("uuid")?.jsonPrimitive?.content ?: "11111111-2222-3333-4444-555555555555")
-                                        put("encryption", "none")
-                                        rawJson?.get("flow")?.jsonPrimitive?.content?.let { put("flow", it) }
+                                        put("id", params["uuid"] ?: params["id"] ?: "11111111-2222-3333-4444-555555555555")
+                                        put("encryption", params["encryption"] ?: "none")
+                                        val flowVal = params["flow"]
+                                        if (!flowVal.isNullOrBlank()) {
+                                            put("flow", flowVal)
+                                        }
                                     }
                                 }
                             }
@@ -191,24 +287,102 @@ object RealXrayConfigBuilder {
 
                     // Stream settings
                     putJsonObject("streamSettings") {
-                        val security = rawJson?.get("security")?.jsonPrimitive?.content ?: "reality"
+                        val pbk = params["pbk"] ?: params["publicKey"] ?: ""
+                        val explicitSecurity = params["security"]?.lowercase()
+                        val security = when {
+                            explicitSecurity == "tls" -> "tls"
+                            explicitSecurity == "reality" && pbk.isNotBlank() -> "reality"
+                            pbk.isNotBlank() -> "reality"
+                            explicitSecurity == "none" -> "none"
+                            else -> if (profile.serverPort == 443 || profile.serverPort == 8443) "tls" else "none"
+                        }
+
                         put("security", security)
-                        val net = rawJson?.get("type")?.jsonPrimitive?.content ?: "tcp"
+                        val net = params["type"]?.lowercase()
+                            ?: params["network"]?.lowercase()
+                            ?: params["net"]?.lowercase()
+                            ?: "tcp"
                         put("network", net)
+
+                        val sni = params["sni"] ?: params["host"] ?: profile.serverAddress
+                        val fp = params["fp"] ?: params["fingerprint"] ?: "chrome"
+                        val alpnList = params["alpn"]?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }
+                            ?: listOf("h2", "http/1.1")
 
                         if (security == "reality") {
                             putJsonObject("realitySettings") {
                                 put("show", false)
-                                put("fingerprint", rawJson?.get("fp")?.jsonPrimitive?.content ?: "chrome")
-                                put("serverName", rawJson?.get("sni")?.jsonPrimitive?.content ?: profile.serverAddress)
-                                put("publicKey", rawJson?.get("pbk")?.jsonPrimitive?.content ?: "")
-                                put("shortId", rawJson?.get("sid")?.jsonPrimitive?.content ?: "")
-                                put("spiderX", rawJson?.get("spx")?.jsonPrimitive?.content ?: "/")
+                                put("fingerprint", fp)
+                                put("serverName", sni)
+                                put("publicKey", pbk)
+                                put("shortId", params["sid"] ?: params["shortId"] ?: "")
+                                put("spiderX", params["spx"] ?: params["spiderX"] ?: "/")
                             }
                         } else if (security == "tls") {
                             putJsonObject("tlsSettings") {
-                                put("allowInsecure", false)
-                                put("serverName", rawJson?.get("sni")?.jsonPrimitive?.content ?: profile.serverAddress)
+                                put("allowInsecure", params["insecure"] == "1" || params["insecure"].equals("true", true))
+                                put("serverName", sni)
+                                put("fingerprint", fp)
+                                putJsonArray("alpn") {
+                                    alpnList.forEach { add(it) }
+                                }
+                            }
+                        }
+
+                        // Transport settings
+                        val path = params["path"] ?: "/"
+                        val host = params["host"] ?: sni
+
+                        when (net) {
+                            "xhttp", "splithttp" -> {
+                                putJsonObject("xhttpSettings") {
+                                    put("mode", params["mode"] ?: "auto")
+                                    put("path", path)
+                                    put("host", host)
+                                    params["extra"]?.let { extraStr ->
+                                        runCatching {
+                                            Json.parseToJsonElement(extraStr).jsonObject
+                                        }.getOrNull()?.let { put("extra", it) }
+                                    }
+                                }
+                            }
+                            "ws" -> {
+                                putJsonObject("wsSettings") {
+                                    put("path", path)
+                                    putJsonObject("headers") {
+                                        put("Host", host)
+                                    }
+                                }
+                            }
+                            "grpc" -> {
+                                putJsonObject("grpcSettings") {
+                                    put("serviceName", params["serviceName"] ?: path.trimStart('/'))
+                                    put("authority", host)
+                                    put("multiMode", true)
+                                }
+                            }
+                            "httpupgrade" -> {
+                                putJsonObject("httpupgradeSettings") {
+                                    put("path", path)
+                                    put("host", host)
+                                }
+                            }
+                            "tcp" -> {
+                                if (params["headerType"] == "http") {
+                                    putJsonObject("tcpSettings") {
+                                        putJsonObject("header") {
+                                            put("type", "http")
+                                            putJsonObject("request") {
+                                                put("version", "1.1")
+                                                put("method", "GET")
+                                                putJsonArray("path") { add(path) }
+                                                putJsonObject("headers") {
+                                                    putJsonArray("Host") { add(host) }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -223,11 +397,21 @@ object RealXrayConfigBuilder {
                                 put("port", profile.serverPort)
                                 putJsonArray("users") {
                                     addJsonObject {
-                                        put("id", rawJson?.get("id")?.jsonPrimitive?.content ?: "11111111-2222-3333-4444-555555555555")
-                                        put("alterId", 0)
-                                        put("security", "auto")
+                                        put("id", params["id"] ?: params["uuid"] ?: "11111111-2222-3333-4444-555555555555")
+                                        put("alterId", params["alterId"]?.toIntOrNull() ?: 0)
+                                        put("security", params["security"] ?: "auto")
                                     }
                                 }
+                            }
+                        }
+                    }
+                    val net = params["type"] ?: params["network"] ?: "tcp"
+                    putJsonObject("streamSettings") {
+                        put("network", net)
+                        if (params["security"] == "tls") {
+                            put("security", "tls")
+                            putJsonObject("tlsSettings") {
+                                put("serverName", params["sni"] ?: params["host"] ?: profile.serverAddress)
                             }
                         }
                     }
@@ -240,25 +424,29 @@ object RealXrayConfigBuilder {
                             addJsonObject {
                                 put("address", profile.serverAddress)
                                 put("port", profile.serverPort)
-                                put("password", rawJson?.get("password")?.jsonPrimitive?.content ?: "")
+                                put("password", params["password"] ?: "")
                             }
                         }
                     }
                     putJsonObject("streamSettings") {
                         put("security", "tls")
                         putJsonObject("tlsSettings") {
-                            put("serverName", rawJson?.get("sni")?.jsonPrimitive?.content ?: profile.serverAddress)
+                            put("serverName", params["sni"] ?: profile.serverAddress)
+                            if (params["insecure"] == "1" || params["insecure"].equals("true", true)) {
+                                put("allowInsecure", true)
+                            }
                         }
                     }
                 }
 
                 ProtocolType.HYSTERIA2 -> {
+                    val hyAuth = params["auth"] ?: params["password"] ?: ""
                     put("protocol", "hysteria")
                     putJsonObject("settings") {
                         put("version", 2)
                         put("address", profile.serverAddress)
                         put("port", profile.serverPort)
-                        put("auth", rawJson?.get("auth")?.jsonPrimitive?.content ?: "")
+                        put("auth", hyAuth)
                         put("up", "0")
                         put("down", "0")
                     }
@@ -266,15 +454,19 @@ object RealXrayConfigBuilder {
                         put("network", "hysteria")
                         put("security", "tls")
                         putJsonObject("tlsSettings") {
-                            put("serverName", rawJson?.get("sni")?.jsonPrimitive?.content ?: profile.serverAddress)
+                            put("serverName", params["sni"] ?: profile.serverAddress)
                             putJsonArray("alpn") {
                                 add("h3")
                             }
-                            if (rawJson?.get("insecure")?.jsonPrimitive?.booleanOrNull == true) {
+                            if (params["insecure"] == "1" || params["insecure"].equals("true", true)) {
                                 put("allowInsecure", true)
                             }
                         }
-                        val obfsPass = rawJson?.get("obfsPassword")?.jsonPrimitive?.content ?: ""
+                        putJsonObject("hysteriaSettings") {
+                            put("version", 2)
+                            put("auth", hyAuth)
+                        }
+                        val obfsPass = params["obfsPassword"] ?: params["obfs-password"] ?: ""
                         if (obfsPass.isNotBlank()) {
                             putJsonObject("finalmask") {
                                 putJsonArray("udp") {
@@ -297,25 +489,25 @@ object RealXrayConfigBuilder {
                             addJsonObject {
                                 put("address", profile.serverAddress)
                                 put("port", profile.serverPort)
-                                put("method", rawJson?.get("method")?.jsonPrimitive?.content ?: "aes-128-gcm")
-                                put("password", rawJson?.get("password")?.jsonPrimitive?.content ?: "")
+                                put("method", params["method"] ?: "aes-128-gcm")
+                                put("password", params["password"] ?: "")
                             }
                         }
                     }
                 }
 
                 ProtocolType.VK_TURN -> {
-                    val wgStr = rawJson?.get("wgConf")?.jsonPrimitive?.contentOrNull
-                        ?: rawJson?.get("wg")?.jsonPrimitive?.contentOrNull
-                    val targetProto = rawJson?.get("targetProtocol")?.jsonPrimitive?.contentOrNull
-                        ?: rawJson?.get("protocol")?.jsonPrimitive?.contentOrNull
+                    val wgStr = params["wgConf"] ?: params["wg"]
+                    val targetProto = params["targetProtocol"] ?: params["protocol"]
 
-                    val isWireguard = !wgStr.isNullOrBlank() || targetProto.equals("wireguard", true) || rawJson?.containsKey("secretKey") == true
+                    val isWireguard = !wgStr.isNullOrBlank() ||
+                            targetProto.equals("wireguard", true) ||
+                            params.containsKey("secretKey")
 
                     if (isWireguard) {
-                        var privKey = rawJson?.get("secretKey")?.jsonPrimitive?.contentOrNull ?: ""
-                        var pubKey = rawJson?.get("publicKey")?.jsonPrimitive?.contentOrNull ?: ""
-                        var address = rawJson?.get("address")?.jsonPrimitive?.contentOrNull ?: "10.0.0.2/32"
+                        var privKey = params["secretKey"] ?: ""
+                        var pubKey = params["publicKey"] ?: ""
+                        var address = params["address"] ?: "10.0.0.2/32"
 
                         if (privKey.isBlank() && !wgStr.isNullOrBlank()) {
                             for (line in wgStr.lines()) {
@@ -370,7 +562,7 @@ object RealXrayConfigBuilder {
                 }
 
                 else -> {
-                    // For upstream relay via local port
+                    // Upstream relay via local port
                     put("protocol", "socks")
                     putJsonObject("settings") {
                         putJsonArray("servers") {
@@ -393,4 +585,3 @@ object RealXrayConfigBuilder {
         }
     }
 }
-

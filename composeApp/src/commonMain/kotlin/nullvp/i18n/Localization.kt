@@ -51,6 +51,10 @@ data class AppStrings(
     val enableIpv6: String,
     val enableIpv6Desc: String,
     val tunMtu: String,
+    val proxyAuth: String,
+    val proxyAuthDesc: String,
+    val proxyUsername: String,
+    val proxyPassword: String,
 
     // Routing & Presets
     val routingMode: String,
@@ -191,6 +195,10 @@ val RussianStrings = AppStrings(
     enableIpv6 = "Маршрутизация IPv6",
     enableIpv6Desc = "Включить обработку и проксирование IPv6 пакетов",
     tunMtu = "MTU виртуального адаптера",
+    proxyAuth = "Авторизация для прокси-портов",
+    proxyAuthDesc = "Запаролить SOCKS5 и HTTP порты логином и паролем от несанкционированного доступа",
+    proxyUsername = "Логин прокси",
+    proxyPassword = "Пароль прокси",
 
     routingMode = "Основной режим маршрутизации",
     presetBypassRuLan = "Умный обход РФ и локальной сети",
@@ -322,6 +330,10 @@ val EnglishStrings = AppStrings(
     enableIpv6 = "IPv6 Routing",
     enableIpv6Desc = "Enable routing and proxying of IPv6 packets",
     tunMtu = "TUN Interface MTU",
+    proxyAuth = "Proxy Authentication",
+    proxyAuthDesc = "Require username and password for incoming SOCKS5 and HTTP connections",
+    proxyUsername = "Proxy Username",
+    proxyPassword = "Proxy Password",
 
     routingMode = "Primary Routing Strategy",
     presetBypassRuLan = "Smart Bypass RU & LAN",

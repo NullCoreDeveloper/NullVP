@@ -1,5 +1,6 @@
 package nullvp.presentation.settings
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -269,6 +270,40 @@ private fun NetworkCategorySection(settings: AppSettings, strings: AppStrings) {
                 shape = RoundedCornerShape(10.dp),
                 singleLine = true
             )
+
+            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+
+            // Proxy Authentication
+            SettingsToggleRow(
+                title = strings.proxyAuth,
+                subtitle = strings.proxyAuthDesc,
+                checked = settings.proxyAuthEnabled,
+                onCheckedChange = { AppStateStore.updateSettings(settings.copy(proxyAuthEnabled = it)) }
+            )
+
+            AnimatedVisibility(visible = settings.proxyAuthEnabled) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedTextField(
+                        value = settings.proxyUsername,
+                        onValueChange = { AppStateStore.updateSettings(settings.copy(proxyUsername = it)) },
+                        label = { Text(strings.proxyUsername) },
+                        placeholder = { Text("admin") },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp),
+                        singleLine = true
+                    )
+
+                    OutlinedTextField(
+                        value = settings.proxyPassword,
+                        onValueChange = { AppStateStore.updateSettings(settings.copy(proxyPassword = it)) },
+                        label = { Text(strings.proxyPassword) },
+                        placeholder = { Text("••••••••") },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp),
+                        singleLine = true
+                    )
+                }
+            }
         }
     }
 }

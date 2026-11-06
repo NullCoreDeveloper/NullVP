@@ -4,6 +4,7 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.serialization.json.*
 import nullvp.data.store.AppStateStore
 import nullvp.data.store.LogLevel
 import nullvp.domain.model.OperationMode
@@ -315,31 +316,53 @@ class DesktopCoreEngine : CoreEngine {
         statsJob = scope.launch(Dispatchers.IO) {
             var prevRx = 0L
             var prevTx = 0L
+            val xrayBin = findBinary("xray")
 
             while (isActive && _isRunning.value) {
                 delay(1000)
 
-                // Try reading real network interface bytes if in TUN mode
-                val rxFile = File("/sys/class/net/$TUN_DEVICE/statistics/rx_bytes")
-                val txFile = File("/sys/class/net/$TUN_DEVICE/statistics/tx_bytes")
-
                 var rxBytes = 0L
                 var txBytes = 0L
 
-                if (mode == OperationMode.TUN && rxFile.exists() && txFile.exists()) {
-                    rxBytes = rxFile.readText().trim().toLongOrNull() ?: 0L
-                    txBytes = txFile.readText().trim().toLongOrNull() ?: 0L
-                } else {
-                    // In Proxy mode, measure active connection traffic from process io
-                    val ioFile = coreProcess?.pid()?.let { pid -> File("/proc/$pid/io") }
-                    if (ioFile?.exists() == true) {
-                        runCatching {
-                            ioFile.readLines().forEach { line ->
-                                if (line.startsWith("read_bytes:")) {
-                                    rxBytes = line.substringAfter(":").trim().toLongOrNull() ?: 0L
-                                } else if (line.startsWith("write_bytes:")) {
-                                    txBytes = line.substringAfter(":").trim().toLongOrNull() ?: 0L
+                // 1. In TUN mode, check virtual adapter stats
+                if (mode == OperationMode.TUN) {
+                    val rxFile = File("/sys/class/net/$TUN_DEVICE/statistics/rx_bytes")
+                    val txFile = File("/sys/class/net/$TUN_DEVICE/statistics/tx_bytes")
+                    if (rxFile.exists() && txFile.exists()) {
+                        rxBytes = rxFile.readText().trim().toLongOrNull() ?: 0L
+                        txBytes = txFile.readText().trim().toLongOrNull() ?: 0L
+                    }
+                }
+
+                // 2. Query Xray Stats API (works accurately for Proxy, System Proxy, and TUN modes)
+                if (xrayBin != null && coreProcess?.isAlive == true) {
+                    runCatching {
+                        val pb = ProcessBuilder(xrayBin.absolutePath, "api", "statsquery", "--server=127.0.0.1:10085")
+                        val proc = pb.start()
+                        val output = proc.inputStream.bufferedReader().use { it.readText() }
+                        proc.waitFor(400, java.util.concurrent.TimeUnit.MILLISECONDS)
+                        if (output.isNotBlank()) {
+                            val parsed = Json.parseToJsonElement(output).jsonObject
+                            val statArray = parsed["stat"]?.jsonArray
+                            var xrayRx = 0L
+                            var xrayTx = 0L
+                            statArray?.forEach { elem ->
+                                val obj = elem.jsonObject
+                                val name = obj["name"]?.jsonPrimitive?.contentOrNull ?: ""
+                                val value = obj["value"]?.jsonPrimitive?.longOrNull ?: 0L
+                                if (name.contains("traffic>>>downlink")) {
+                                    if (name.contains("socks-in") || name.contains("http-in") || name.contains("proxy")) {
+                                        xrayRx = maxOf(xrayRx, value)
+                                    }
+                                } else if (name.contains("traffic>>>uplink")) {
+                                    if (name.contains("socks-in") || name.contains("http-in") || name.contains("proxy")) {
+                                        xrayTx = maxOf(xrayTx, value)
+                                    }
                                 }
+                            }
+                            if (xrayRx > 0L || xrayTx > 0L) {
+                                rxBytes = maxOf(rxBytes, xrayRx)
+                                txBytes = maxOf(txBytes, xrayTx)
                             }
                         }
                     }

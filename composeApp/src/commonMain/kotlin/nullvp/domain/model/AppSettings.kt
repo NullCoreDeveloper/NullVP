@@ -43,6 +43,11 @@ data class AppSettings(
     val enableIpv6: Boolean = false,
     val tunMtu: Int = 1500,
 
+    // Proxy Authentication (Optional password protection for proxy ports)
+    val proxyAuthEnabled: Boolean = false,
+    val proxyUsername: String = "",
+    val proxyPassword: String = "",
+
     // Routing Strategy & Quick Toggles
     val routingStrategy: RoutingStrategy = RoutingStrategy.BYPASS_LAN_AND_RU,
     val blockAds: Boolean = true,  // Block ads enabled by default!

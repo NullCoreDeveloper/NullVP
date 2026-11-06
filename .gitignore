@@ -15,12 +15,14 @@ captures/
 *.dat
 dist/
 /bin/
+/*/bin/
 keystore.properties
 *.jks
 *.keystore
 
 # Go artifacts
 /core-bridge/bin/
+/*/bin/
 /core-bridge/dist/
 /core-bridge/*.aar
 /core-bridge/*.jar

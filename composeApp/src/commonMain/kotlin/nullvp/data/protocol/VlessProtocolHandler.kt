@@ -51,13 +51,26 @@ class VlessProtocolHandler : ProtocolHandler {
             val host = hostPort.substring(0, colonIdx)
             val port = hostPort.substring(colonIdx + 1).toIntOrNull() ?: return null
 
-            // Build minimal JSON config representing this VLESS outbound
+            // Build JSON config representing this VLESS outbound with unpacked params
             val configJson = buildJsonObject {
                 put("uuid", uuid)
                 put("host", host)
                 put("port", port)
-                put("query", queryStr)
                 put("name", name)
+                put("query", queryStr)
+
+                // Unpack query params
+                if (queryStr.isNotBlank()) {
+                    queryStr.split('&').forEach { param ->
+                        val eqIdx = param.indexOf('=')
+                        if (eqIdx > 0) {
+                            val key = param.substring(0, eqIdx)
+                            val rawVal = param.substring(eqIdx + 1)
+                            val value = runCatching { URLDecoder.decode(rawVal, "UTF-8") }.getOrDefault(rawVal)
+                            put(key, value)
+                        }
+                    }
+                }
             }.toString()
 
             val id = "vless_${host.replace('.', '_')}_${port}_${(1000..9999).random()}"

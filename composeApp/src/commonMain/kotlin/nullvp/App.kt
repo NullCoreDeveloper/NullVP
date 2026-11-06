@@ -597,7 +597,13 @@ fun App() {
                                                         profile = profile,
                                                         isSelected = profile.id == selectedProfileId,
                                                         onSelect = {
+                                                            val prevId = selectedProfileId
                                                             AppStateStore.selectProfile(profile.id)
+                                                            if (isRunning && prevId != profile.id) {
+                                                                scope.launch {
+                                                                    coreEngine.start(profile)
+                                                                }
+                                                            }
                                                             currentScreen = Screen.DASHBOARD
                                                         }
                                                     )
@@ -811,7 +817,14 @@ fun App() {
             EditProfileDialog(
                 profile = profile,
                 onDismiss = { profileToEdit = null },
-                onSave = { updated -> AppStateStore.updateProfile(updated) },
+                onSave = { updated ->
+                    AppStateStore.updateProfile(updated)
+                    if (isRunning && updated.id == selectedProfileId) {
+                        scope.launch {
+                            coreEngine.start(updated)
+                        }
+                    }
+                },
                 onDelete = { id -> AppStateStore.deleteProfile(id) },
                 onDuplicate = { p -> AppStateStore.duplicateProfile(p) }
             )

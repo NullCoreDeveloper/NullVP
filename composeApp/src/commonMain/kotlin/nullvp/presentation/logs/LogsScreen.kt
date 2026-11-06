@@ -24,6 +24,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
+import nullvp.presentation.components.AppVerticalScrollbar
 import nullvp.presentation.components.NullVpTextField
 import nullvp.data.store.AppStateStore
 import nullvp.data.store.LogLevel
@@ -198,7 +199,7 @@ fun LogsScreen() {
 
         Spacer(Modifier.height(12.dp))
 
-        // Terminal-style Log Viewport with SelectionContainer
+        // Terminal-style Log Viewport with SelectionContainer & Vertical Scrollbar
         Card(
             modifier = Modifier
                 .fillMaxWidth()
@@ -207,27 +208,42 @@ fun LogsScreen() {
             colors = CardDefaults.cardColors(containerColor = Color(0xFF0A0E17)),
             border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1F293D))
         ) {
-            SelectionContainer(modifier = Modifier.fillMaxSize().padding(12.dp)) {
-                if (filteredLogs.isEmpty()) {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text(
-                            text = if (settings.language.code == "ru") "Логов пока нет" else "No logs recorded",
-                            color = Color(0xFF546E7A),
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 13.sp
-                        )
-                    }
-                } else {
-                    LazyColumn(
-                        state = listState,
-                        modifier = Modifier.fillMaxSize(),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        itemsIndexed(filteredLogs, key = { index, log -> "${log.id}_$index" }) { _, log ->
-                            LogItemRow(log)
+            Box(modifier = Modifier.fillMaxSize()) {
+                SelectionContainer(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(start = 12.dp, top = 12.dp, bottom = 12.dp, end = 20.dp)
+                ) {
+                    if (filteredLogs.isEmpty()) {
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text(
+                                text = if (settings.language.code == "ru") "Логов пока нет" else "No logs recorded",
+                                color = Color(0xFF546E7A),
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 13.sp
+                            )
+                        }
+                    } else {
+                        LazyColumn(
+                            state = listState,
+                            modifier = Modifier.fillMaxSize(),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            itemsIndexed(filteredLogs, key = { index, log -> "${log.id}_$index" }) { _, log ->
+                                LogItemRow(log)
+                            }
                         }
                     }
                 }
+
+                // Draggable vertical scrollbar on the right edge
+                AppVerticalScrollbar(
+                    listState = listState,
+                    modifier = Modifier
+                        .align(Alignment.CenterEnd)
+                        .fillMaxHeight()
+                        .padding(vertical = 4.dp, horizontal = 2.dp)
+                )
             }
         }
 
