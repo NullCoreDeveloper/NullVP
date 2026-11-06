@@ -42,7 +42,7 @@ class VmessProtocolHandler : ProtocolHandler {
             val name = obj["ps"]?.jsonPrimitive?.content ?: "VMess Node"
             val host = obj["add"]?.jsonPrimitive?.content ?: return null
             val port = obj["port"]?.jsonPrimitive?.intOrNull ?: return null
-            val id = "vmess_${host.replace('.', '_')}_$port"
+            val id = "vmess_${host.replace('.', '_')}_${port}_${(1000..9999).random()}"
 
             Profile(
                 id = id,
@@ -112,7 +112,7 @@ class TrojanProtocolHandler : ProtocolHandler {
                 put("name", name)
             }.toString()
 
-            val id = "trojan_${host.replace('.', '_')}_$port"
+            val id = "trojan_${host.replace('.', '_')}_${port}_${(1000..9999).random()}"
 
             Profile(
                 id = id,
@@ -188,7 +188,7 @@ class ShadowsocksProtocolHandler : ProtocolHandler {
                 put("name", name)
             }.toString()
 
-            val id = "ss_${host.replace('.', '_')}_$port"
+            val id = "ss_${host.replace('.', '_')}_${port}_${(1000..9999).random()}"
 
             Profile(
                 id = id,

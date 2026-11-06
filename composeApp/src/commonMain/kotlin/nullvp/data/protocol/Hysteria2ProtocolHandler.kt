@@ -76,7 +76,7 @@ class Hysteria2ProtocolHandler : ProtocolHandler {
                 put("name", name)
             }.toString()
 
-            val id = "hy2_${host.replace('.', '_')}_$port"
+            val id = "hy2_${host.replace('.', '_')}_${port}_${(1000..9999).random()}"
 
             Profile(
                 id = id,

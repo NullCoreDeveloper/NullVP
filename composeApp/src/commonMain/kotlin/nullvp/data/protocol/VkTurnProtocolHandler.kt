@@ -67,7 +67,7 @@ class VkTurnProtocolHandler : ProtocolHandler {
             serverPort = jsonElement["port"]?.jsonPrimitive?.intOrNull ?: 443
         }
 
-        val id = "vkturn_${serverAddr.replace('.', '_')}_$serverPort"
+        val id = "vkturn_${serverAddr.replace('.', '_')}_${serverPort}_${(1000..9999).random()}"
 
         return Profile(
             id = id,

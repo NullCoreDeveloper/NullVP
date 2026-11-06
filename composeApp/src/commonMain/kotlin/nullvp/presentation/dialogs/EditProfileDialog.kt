@@ -19,6 +19,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import nullvp.domain.model.Profile
+import nullvp.presentation.components.NullVpTextField
 import nullvp.theme.*
 
 @Composable
@@ -71,18 +72,12 @@ fun EditProfileDialog(
                 Spacer(modifier = Modifier.height(16.dp))
 
                 // Profile Name
-                OutlinedTextField(
+                NullVpTextField(
                     value = name,
                     onValueChange = { name = it },
                     label = { Text("Profile Name") },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = NeonCyan,
-                        unfocusedBorderColor = DarkSurfaceVariant,
-                        focusedTextColor = OnDarkSurface,
-                        unfocusedTextColor = OnDarkSurface
-                    )
+                    modifier = Modifier.fillMaxWidth()
                 )
 
                 Spacer(modifier = Modifier.height(12.dp))
@@ -92,32 +87,21 @@ fun EditProfileDialog(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    OutlinedTextField(
+                    NullVpTextField(
                         value = serverAddress,
                         onValueChange = { serverAddress = it },
                         label = { Text("Server Host / IP") },
                         singleLine = true,
-                        modifier = Modifier.weight(1f),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = NeonCyan,
-                            unfocusedBorderColor = DarkSurfaceVariant,
-                            focusedTextColor = OnDarkSurface,
-                            unfocusedTextColor = OnDarkSurface
-                        )
+                        modifier = Modifier.weight(1f)
                     )
 
-                    OutlinedTextField(
+                    NullVpTextField(
                         value = serverPort,
                         onValueChange = { serverPort = it.filter { ch -> ch.isDigit() } },
                         label = { Text("Port") },
                         singleLine = true,
-                        modifier = Modifier.width(100.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = NeonCyan,
-                            unfocusedBorderColor = DarkSurfaceVariant,
-                            focusedTextColor = OnDarkSurface,
-                            unfocusedTextColor = OnDarkSurface
-                        )
+                        showPasteButton = false,
+                        modifier = Modifier.width(100.dp)
                     )
                 }
 
@@ -130,20 +114,15 @@ fun EditProfileDialog(
                     color = OnDarkSurfaceVariant
                 )
                 Spacer(modifier = Modifier.height(4.dp))
-                OutlinedTextField(
+                NullVpTextField(
                     value = rawConfig,
                     onValueChange = { rawConfig = it },
                     placeholder = { Text("Protocol JSON config...") },
+                    singleLine = false,
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(min = 120.dp, max = 220.dp),
-                    textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = NeonCyan,
-                        unfocusedBorderColor = DarkSurfaceVariant,
-                        focusedTextColor = OnDarkSurface,
-                        unfocusedTextColor = OnDarkSurface
-                    )
+                    textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace)
                 )
 
                 if (errorMessage != null) {

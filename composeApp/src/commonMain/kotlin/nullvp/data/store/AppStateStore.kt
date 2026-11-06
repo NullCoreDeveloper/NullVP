@@ -116,10 +116,16 @@ object AppStateStore {
 
     fun addProfile(profile: Profile) {
         val list = _profiles.value.toMutableList()
-        list.add(0, profile)
+        val safeId = if (list.any { it.id == profile.id }) {
+            "${profile.id}_${System.currentTimeMillis()}"
+        } else {
+            profile.id
+        }
+        val safeProfile = if (safeId != profile.id) profile.copy(id = safeId) else profile
+        list.add(0, safeProfile)
         _profiles.value = list
-        _selectedProfileId.value = profile.id
-        addLog(LogLevel.INFO, "ProfileManager", "Added profile '${profile.name}' (${profile.protocolType})")
+        _selectedProfileId.value = safeProfile.id
+        addLog(LogLevel.INFO, "ProfileManager", "Added profile '${safeProfile.name}' (${safeProfile.protocolType})")
     }
 
     fun updateProfile(profile: Profile) {
@@ -139,7 +145,7 @@ object AppStateStore {
 
     fun duplicateProfile(profile: Profile) {
         val copy = profile.copy(
-            id = "profile_${System.currentTimeMillis()}",
+            id = "profile_${System.currentTimeMillis()}_${(100..999).random()}",
             name = "${profile.name} (Copy)"
         )
         addProfile(copy)
@@ -151,13 +157,24 @@ object AppStateStore {
         _subscriptions.value = currentSubs
 
         val otherProfiles = _profiles.value.filter { it.subscriptionId != sub.id }.toMutableList()
-        otherProfiles.addAll(0, newProfiles)
+        val existingIds = otherProfiles.map { it.id }.toMutableSet()
+
+        val deduplicatedProfiles = newProfiles.mapIndexed { idx, p ->
+            var candidateId = "${p.id}_${idx}"
+            while (existingIds.contains(candidateId)) {
+                candidateId = "${p.id}_${idx}_${System.nanoTime().toString(36)}"
+            }
+            existingIds.add(candidateId)
+            p.copy(id = candidateId, subscriptionId = sub.id)
+        }
+
+        otherProfiles.addAll(0, deduplicatedProfiles)
         _profiles.value = otherProfiles
 
         if (_selectedProfileId.value == null || !otherProfiles.any { it.id == _selectedProfileId.value }) {
             _selectedProfileId.value = otherProfiles.firstOrNull()?.id
         }
-        addLog(LogLevel.INFO, "SubscriptionManager", "Imported subscription '${sub.name}' with ${newProfiles.size} nodes")
+        addLog(LogLevel.INFO, "SubscriptionManager", "Imported subscription '${sub.name}' with ${deduplicatedProfiles.size} nodes")
     }
 
     fun deleteSubscription(subId: String) {

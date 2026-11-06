@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -23,6 +24,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
+import nullvp.presentation.components.NullVpTextField
 import nullvp.data.store.AppStateStore
 import nullvp.data.store.LogLevel
 import nullvp.i18n.Localization
@@ -142,12 +144,11 @@ fun LogsScreen() {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            OutlinedTextField(
+            NullVpTextField(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
                 placeholder = { Text(strings.searchLogs, fontSize = 13.sp) },
                 modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(10.dp),
                 singleLine = true
             )
 
@@ -222,7 +223,7 @@ fun LogsScreen() {
                         modifier = Modifier.fillMaxSize(),
                         verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        items(filteredLogs, key = { it.id }) { log ->
+                        itemsIndexed(filteredLogs, key = { index, log -> "${log.id}_$index" }) { _, log ->
                             LogItemRow(log)
                         }
                     }

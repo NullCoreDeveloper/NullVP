@@ -56,7 +56,7 @@ class MdnsProtocolHandler : ProtocolHandler {
             ?: jsonElement["listen_port"]?.jsonPrimitive?.intOrNull
             ?: 18000
 
-        val id = "mdns_${serverAddr.replace('.', '_')}_$listenPort"
+        val id = "mdns_${serverAddr.replace('.', '_')}_${listenPort}_${(1000..9999).random()}"
 
         return Profile(
             id = id,

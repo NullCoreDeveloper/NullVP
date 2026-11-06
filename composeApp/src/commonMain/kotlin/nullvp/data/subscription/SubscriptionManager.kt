@@ -56,12 +56,14 @@ class SubscriptionManager(
                 ?: "Subscription"
 
             val profiles = mutableListOf<Profile>()
+            var nodeIdx = 0
             for (line in lines) {
                 val trimmed = line.trim()
                 if (trimmed.isBlank() || trimmed.startsWith("#")) continue
                 val profile = ProtocolRegistry.parse(trimmed)
                 if (profile != null) {
-                    profiles.add(profile.copy(subscriptionId = subId))
+                    val uniqueId = "${profile.id}_${nodeIdx++}"
+                    profiles.add(profile.copy(id = uniqueId, subscriptionId = subId))
                 }
             }
 

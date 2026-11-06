@@ -17,6 +17,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import nullvp.domain.model.CustomRoutingRule
 import nullvp.i18n.AppStrings
+import nullvp.presentation.components.NullVpTextField
 
 @Composable
 fun EditRuleDialog(
@@ -56,12 +57,11 @@ fun EditRuleDialog(
                 Spacer(Modifier.height(16.dp))
 
                 // Name
-                OutlinedTextField(
+                NullVpTextField(
                     value = name,
                     onValueChange = { name = it },
                     label = { Text(strings.ruleName) },
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(10.dp),
                     singleLine = true
                 )
 
@@ -111,28 +111,26 @@ fun EditRuleDialog(
                 Spacer(Modifier.height(16.dp))
 
                 // Domains
-                OutlinedTextField(
+                NullVpTextField(
                     value = domainsText,
                     onValueChange = { domainsText = it },
                     label = { Text(strings.ruleDomains) },
                     placeholder = { Text("geosite:category-gov-ru, yandex.ru, vk.com") },
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(10.dp),
-                    minLines = 2,
+                    singleLine = false,
                     maxLines = 4
                 )
 
                 Spacer(Modifier.height(12.dp))
 
                 // IPs
-                OutlinedTextField(
+                NullVpTextField(
                     value = ipsText,
                     onValueChange = { ipsText = it },
                     label = { Text(strings.ruleIps) },
                     placeholder = { Text("geoip:ru, 192.168.1.0/24") },
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(10.dp),
-                    minLines = 2,
+                    singleLine = false,
                     maxLines = 4
                 )
 

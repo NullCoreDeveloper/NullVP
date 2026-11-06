@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -33,8 +34,10 @@ import nullvp.domain.model.OperationMode
 import nullvp.domain.model.Profile
 import nullvp.domain.protocol.ProtocolRegistry
 import nullvp.i18n.Localization
+import nullvp.platform.ClipboardHelper
 import nullvp.presentation.components.ConnectButton
 import nullvp.presentation.components.ConnectState
+import nullvp.presentation.components.NullVpTextField
 import nullvp.presentation.components.ServerCard
 import nullvp.presentation.components.SpeedRow
 import nullvp.presentation.components.SubscriptionCard
@@ -364,15 +367,66 @@ fun App() {
                                             fontWeight = FontWeight.Bold,
                                             color = OnDarkSurface
                                         )
-                                        Button(
-                                            onClick = { currentScreen = Screen.SUBSCRIPTIONS },
-                                            colors = ButtonDefaults.buttonColors(containerColor = NeonCyan, contentColor = Color.Black),
-                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                                            shape = RoundedCornerShape(8.dp)
-                                        ) {
-                                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                                            Spacer(Modifier.width(4.dp))
-                                            Text(strings.addServer, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            OutlinedButton(
+                                                onClick = {
+                                                    val clip = ClipboardHelper.getText()?.trim()
+                                                    if (clip.isNullOrBlank()) {
+                                                        subImportError = if (settings.language.code == "ru") "Буфер обмена пуст" else "Clipboard is empty"
+                                                        return@OutlinedButton
+                                                    }
+                                                    if (clip.startsWith("http://") || clip.startsWith("https://")) {
+                                                        isSubLoading = true
+                                                        scope.launch {
+                                                            subscriptionManager.fetchSubscription(clip, null)
+                                                                .onSuccess { (sub, nodes) ->
+                                                                    isSubLoading = false
+                                                                    AppStateStore.addSubscription(sub, nodes)
+                                                                }.onFailure { err ->
+                                                                    isSubLoading = false
+                                                                    subImportError = "Fetch error: ${err.message}"
+                                                                }
+                                                        }
+                                                    } else {
+                                                        val lines = clip.split("\n", "\r\n")
+                                                        var addedCount = 0
+                                                        for (l in lines) {
+                                                            val line = l.trim()
+                                                            if (line.isBlank() || line.startsWith("#")) continue
+                                                            val p = ProtocolRegistry.parse(line)
+                                                            if (p != null) {
+                                                                AppStateStore.addProfile(p)
+                                                                addedCount++
+                                                            }
+                                                        }
+                                                        if (addedCount == 0) {
+                                                            val single = ProtocolRegistry.parse(clip)
+                                                            if (single != null) {
+                                                                AppStateStore.addProfile(single)
+                                                            }
+                                                        }
+                                                    }
+                                                },
+                                                colors = ButtonDefaults.outlinedButtonColors(contentColor = NeonCyan),
+                                                border = androidx.compose.foundation.BorderStroke(1.dp, NeonCyan.copy(alpha = 0.6f)),
+                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                                shape = RoundedCornerShape(8.dp)
+                                            ) {
+                                                Icon(PasteIcon, contentDescription = null, modifier = Modifier.size(16.dp))
+                                                Spacer(Modifier.width(4.dp))
+                                                Text(if (settings.language.code == "ru") "Из буфера" else "From Clipboard", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                            }
+
+                                            Button(
+                                                onClick = { currentScreen = Screen.SUBSCRIPTIONS },
+                                                colors = ButtonDefaults.buttonColors(containerColor = NeonCyan, contentColor = Color.Black),
+                                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                                shape = RoundedCornerShape(8.dp)
+                                            ) {
+                                                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                                                Spacer(Modifier.width(4.dp))
+                                                Text(strings.addServer, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                            }
                                         }
                                     }
 
@@ -382,7 +436,7 @@ fun App() {
                                         verticalArrangement = Arrangement.spacedBy(10.dp),
                                         modifier = Modifier.fillMaxSize()
                                     ) {
-                                        items(profiles, key = { it.id }) { profile ->
+                                        itemsIndexed(profiles, key = { index, profile -> "${profile.id}_$index" }) { _, profile ->
                                             Row(
                                                 modifier = Modifier.fillMaxWidth(),
                                                 verticalAlignment = Alignment.CenterVertically
@@ -438,22 +492,17 @@ fun App() {
                                     Spacer(modifier = Modifier.height(16.dp))
 
                                     // Add Subscription / Import Box
-                                    OutlinedTextField(
+                                    NullVpTextField(
                                         value = newSubUrl,
                                         onValueChange = {
                                             newSubUrl = it
                                             subImportError = null
                                         },
-                                        placeholder = { Text("https://... or vless:// or mdns://...") },
+                                        placeholder = { Text("https://... or vless:// or mdns:// or vkturn://...") },
                                         singleLine = true,
-                                        modifier = Modifier.fillMaxWidth(),
-                                        shape = RoundedCornerShape(10.dp),
-                                        colors = OutlinedTextFieldDefaults.colors(
-                                            focusedBorderColor = NeonCyan,
-                                            unfocusedBorderColor = DarkSurfaceVariant,
-                                            focusedTextColor = OnDarkSurface,
-                                            unfocusedTextColor = OnDarkSurface
-                                        )
+                                        showPasteButton = true,
+                                        showClearButton = true,
+                                        modifier = Modifier.fillMaxWidth()
                                     )
 
                                     if (subImportError != null) {
@@ -516,7 +565,7 @@ fun App() {
                                         verticalArrangement = Arrangement.spacedBy(10.dp),
                                         modifier = Modifier.fillMaxSize()
                                     ) {
-                                        items(subscriptions, key = { it.id }) { sub ->
+                                        itemsIndexed(subscriptions, key = { index, sub -> "${sub.id}_$index" }) { _, sub ->
                                             SubscriptionCard(
                                                 subscription = sub,
                                                 onRefresh = {
