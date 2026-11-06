@@ -2,10 +2,14 @@ package nullvp
 
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.*
@@ -17,29 +21,33 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import io.ktor.client.*
 import kotlinx.coroutines.launch
 import nullvp.core.getPlatformCoreEngine
 import nullvp.data.protocol.*
 import nullvp.data.store.AppStateStore
 import nullvp.data.subscription.SubscriptionManager
+import nullvp.domain.model.OperationMode
 import nullvp.domain.model.Profile
 import nullvp.domain.protocol.ProtocolRegistry
+import nullvp.i18n.Localization
 import nullvp.presentation.components.ConnectButton
 import nullvp.presentation.components.ConnectState
 import nullvp.presentation.components.ServerCard
 import nullvp.presentation.components.SpeedRow
 import nullvp.presentation.components.SubscriptionCard
 import nullvp.presentation.dialogs.EditProfileDialog
+import nullvp.presentation.logs.LogsScreen
 import nullvp.presentation.settings.SettingsScreen
 import nullvp.theme.*
 
-enum class Screen(val title: String) {
-    DASHBOARD("Home"),
-    SERVERS("Servers"),
-    SUBSCRIPTIONS("Subscriptions"),
-    SETTINGS("Settings"),
-    LOGS("Logs")
+enum class Screen {
+    DASHBOARD,
+    SERVERS,
+    SUBSCRIPTIONS,
+    SETTINGS,
+    LOGS
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -66,7 +74,8 @@ fun App() {
     val settings by AppStateStore.settings.collectAsState()
     val isRunning by coreEngine.isRunning.collectAsState()
     val stats by coreEngine.stats.collectAsState()
-    val logs by coreEngine.logs.collectAsState()
+
+    val strings = Localization.get(settings.language)
 
     var currentScreen by remember { mutableStateOf(Screen.DASHBOARD) }
     var profileToEdit by remember { mutableStateOf<Profile?>(null) }
@@ -90,7 +99,7 @@ fun App() {
 
     NullVpTheme {
         BoxWithConstraints(modifier = Modifier.fillMaxSize().background(DarkBackground)) {
-            val isWideScreen = maxWidth >= 640.dp
+            val isWideScreen = maxWidth >= 680.dp
 
             Row(modifier = Modifier.fillMaxSize()) {
                 // Wide Screen Navigation Rail (Desktop / Tablet)
@@ -98,45 +107,45 @@ fun App() {
                     NavigationRail(
                         containerColor = DarkSurface,
                         contentColor = OnDarkSurface,
-                        modifier = Modifier.fillMaxHeight()
+                        modifier = Modifier.fillMaxHeight().width(90.dp)
                     ) {
                         Spacer(modifier = Modifier.height(16.dp))
                         Text(
                             text = "NullVP",
                             style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold,
+                            fontWeight = FontWeight.ExtraBold,
                             color = NeonCyan,
-                            modifier = Modifier.padding(bottom = 24.dp)
+                            modifier = Modifier.padding(bottom = 20.dp)
                         )
                         NavigationRailItem(
                             selected = currentScreen == Screen.DASHBOARD,
                             onClick = { currentScreen = Screen.DASHBOARD },
-                            icon = { Icon(Icons.Default.Home, contentDescription = "Home") },
-                            label = { Text("Home") }
+                            icon = { Icon(Icons.Default.Home, contentDescription = strings.navHome) },
+                            label = { Text(strings.navHome, fontSize = 11.sp) }
                         )
                         NavigationRailItem(
                             selected = currentScreen == Screen.SERVERS,
                             onClick = { currentScreen = Screen.SERVERS },
-                            icon = { Icon(Icons.AutoMirrored.Filled.List, contentDescription = "Servers") },
-                            label = { Text("Servers") }
+                            icon = { Icon(Icons.AutoMirrored.Filled.List, contentDescription = strings.navServers) },
+                            label = { Text(strings.navServers, fontSize = 11.sp) }
                         )
                         NavigationRailItem(
                             selected = currentScreen == Screen.SUBSCRIPTIONS,
                             onClick = { currentScreen = Screen.SUBSCRIPTIONS },
-                            icon = { Icon(Icons.Default.Refresh, contentDescription = "Subs") },
-                            label = { Text("Subs") }
+                            icon = { Icon(Icons.Default.Refresh, contentDescription = strings.navSubscriptions) },
+                            label = { Text(strings.navSubscriptions, fontSize = 11.sp) }
                         )
                         NavigationRailItem(
                             selected = currentScreen == Screen.SETTINGS,
                             onClick = { currentScreen = Screen.SETTINGS },
-                            icon = { Icon(Icons.Default.Settings, contentDescription = "Settings") },
-                            label = { Text("Settings") }
+                            icon = { Icon(Icons.Default.Settings, contentDescription = strings.navSettings) },
+                            label = { Text(strings.navSettings, fontSize = 11.sp) }
                         )
                         NavigationRailItem(
                             selected = currentScreen == Screen.LOGS,
                             onClick = { currentScreen = Screen.LOGS },
-                            icon = { Icon(Icons.Default.Info, contentDescription = "Logs") },
-                            label = { Text("Logs") }
+                            icon = { Icon(Icons.Default.Info, contentDescription = strings.navLogs) },
+                            label = { Text(strings.navLogs, fontSize = 11.sp) }
                         )
                     }
                 }
@@ -154,32 +163,32 @@ fun App() {
                                 NavigationBarItem(
                                     selected = currentScreen == Screen.DASHBOARD,
                                     onClick = { currentScreen = Screen.DASHBOARD },
-                                    icon = { Icon(Icons.Default.Home, contentDescription = "Home") },
-                                    label = { Text("Home") }
+                                    icon = { Icon(Icons.Default.Home, contentDescription = strings.navHome) },
+                                    label = { Text(strings.navHome, fontSize = 10.sp) }
                                 )
                                 NavigationBarItem(
                                     selected = currentScreen == Screen.SERVERS,
                                     onClick = { currentScreen = Screen.SERVERS },
-                                    icon = { Icon(Icons.AutoMirrored.Filled.List, contentDescription = "Servers") },
-                                    label = { Text("Servers") }
+                                    icon = { Icon(Icons.AutoMirrored.Filled.List, contentDescription = strings.navServers) },
+                                    label = { Text(strings.navServers, fontSize = 10.sp) }
                                 )
                                 NavigationBarItem(
                                     selected = currentScreen == Screen.SUBSCRIPTIONS,
                                     onClick = { currentScreen = Screen.SUBSCRIPTIONS },
-                                    icon = { Icon(Icons.Default.Refresh, contentDescription = "Subs") },
-                                    label = { Text("Subs") }
+                                    icon = { Icon(Icons.Default.Refresh, contentDescription = strings.navSubscriptions) },
+                                    label = { Text(strings.navSubscriptions, fontSize = 10.sp) }
                                 )
                                 NavigationBarItem(
                                     selected = currentScreen == Screen.SETTINGS,
                                     onClick = { currentScreen = Screen.SETTINGS },
-                                    icon = { Icon(Icons.Default.Settings, contentDescription = "Settings") },
-                                    label = { Text("Settings") }
+                                    icon = { Icon(Icons.Default.Settings, contentDescription = strings.navSettings) },
+                                    label = { Text(strings.navSettings, fontSize = 10.sp) }
                                 )
                                 NavigationBarItem(
                                     selected = currentScreen == Screen.LOGS,
                                     onClick = { currentScreen = Screen.LOGS },
-                                    icon = { Icon(Icons.Default.Info, contentDescription = "Logs") },
-                                    label = { Text("Logs") }
+                                    icon = { Icon(Icons.Default.Info, contentDescription = strings.navLogs) },
+                                    label = { Text(strings.navLogs, fontSize = 10.sp) }
                                 )
                             }
                         }
@@ -191,46 +200,96 @@ fun App() {
                                 Column(
                                     modifier = Modifier
                                         .fillMaxSize()
+                                        .verticalScroll(rememberScrollState())
                                         .padding(24.dp),
                                     horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.SpaceBetween
+                                    verticalArrangement = Arrangement.spacedBy(20.dp)
                                 ) {
-                                    // Header
+                                    // Top Header with Branding and Status
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.SpaceBetween,
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Column {
-                                            Text(
-                                                text = "NullVP",
-                                                style = MaterialTheme.typography.headlineMedium,
-                                                fontWeight = FontWeight.Bold,
-                                                color = NeonCyan
-                                            )
-                                            Text(
-                                                text = settings.appVersion,
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = OnDarkSurfaceVariant
-                                            )
-                                        }
-                                        Text(
-                                            text = when (connectState) {
-                                                ConnectState.CONNECTED -> "CONNECTED"
-                                                ConnectState.CONNECTING -> "CONNECTING..."
-                                                ConnectState.DISCONNECTED -> "READY"
-                                            },
-                                            style = MaterialTheme.typography.labelMedium,
-                                            fontWeight = FontWeight.Bold,
-                                            color = when (connectState) {
-                                                ConnectState.CONNECTED -> CyberGreen
-                                                ConnectState.CONNECTING -> NeonCyan
-                                                ConnectState.DISCONNECTED -> OnDarkSurfaceVariant
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Text(
+                                                    text = "NullVP",
+                                                    style = MaterialTheme.typography.headlineMedium,
+                                                    fontWeight = FontWeight.ExtraBold,
+                                                    color = NeonCyan
+                                                )
+                                                Spacer(Modifier.width(8.dp))
+                                                Surface(
+                                                    shape = RoundedCornerShape(6.dp),
+                                                    color = NeonCyan.copy(alpha = 0.15f)
+                                                ) {
+                                                    Text(
+                                                        text = settings.appVersion,
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = NeonCyan,
+                                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                    )
+                                                }
                                             }
-                                        )
+                                        }
+
+                                        // Status Chip
+                                        Surface(
+                                            shape = RoundedCornerShape(12.dp),
+                                            color = when (connectState) {
+                                                ConnectState.CONNECTED -> CyberGreen.copy(alpha = 0.18f)
+                                                ConnectState.CONNECTING -> NeonCyan.copy(alpha = 0.18f)
+                                                ConnectState.DISCONNECTED -> DarkSurfaceVariant
+                                            },
+                                            border = androidx.compose.foundation.BorderStroke(
+                                                1.dp,
+                                                when (connectState) {
+                                                    ConnectState.CONNECTED -> CyberGreen.copy(alpha = 0.6f)
+                                                    ConnectState.CONNECTING -> NeonCyan.copy(alpha = 0.6f)
+                                                    ConnectState.DISCONNECTED -> Color.Transparent
+                                                }
+                                            )
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(8.dp)
+                                                        .clip(RoundedCornerShape(4.dp))
+                                                        .background(
+                                                            when (connectState) {
+                                                                ConnectState.CONNECTED -> CyberGreen
+                                                                ConnectState.CONNECTING -> NeonCyan
+                                                                ConnectState.DISCONNECTED -> OnDarkSurfaceVariant
+                                                            }
+                                                        )
+                                                )
+                                                Spacer(Modifier.width(8.dp))
+                                                Text(
+                                                    text = when (connectState) {
+                                                        ConnectState.CONNECTED -> strings.statusConnected.uppercase()
+                                                        ConnectState.CONNECTING -> strings.statusConnecting.uppercase()
+                                                        ConnectState.DISCONNECTED -> strings.statusDisconnected.uppercase()
+                                                    },
+                                                    style = MaterialTheme.typography.labelMedium,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = when (connectState) {
+                                                        ConnectState.CONNECTED -> CyberGreen
+                                                        ConnectState.CONNECTING -> NeonCyan
+                                                        ConnectState.DISCONNECTED -> OnDarkSurfaceVariant
+                                                    }
+                                                )
+                                            }
+                                        }
                                     }
 
-                                    // Big Action Button
+                                    Spacer(modifier = Modifier.height(10.dp))
+
+                                    // Big Connect Button with Neon Ring
                                     ConnectButton(
                                         state = connectState,
                                         onClick = {
@@ -242,22 +301,83 @@ fun App() {
                                         }
                                     )
 
-                                    // Speed Meters & Active Node Card
-                                    Column(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    // Operation Mode Segmented Switcher (Requirement #2)
+                                    Card(
+                                        shape = RoundedCornerShape(14.dp),
+                                        colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                                        border = androidx.compose.foundation.BorderStroke(1.dp, DarkSurfaceVariant)
                                     ) {
-                                        SpeedRow(
-                                            rxSpeedBps = stats.rxSpeedBps,
-                                            txSpeedBps = stats.txSpeedBps
-                                        )
-                                        Spacer(modifier = Modifier.height(14.dp))
-                                        if (activeProfile != null) {
-                                            ServerCard(
-                                                profile = activeProfile,
-                                                isSelected = true,
-                                                onSelect = { currentScreen = Screen.SERVERS }
+                                        Column(
+                                            modifier = Modifier.padding(12.dp),
+                                            horizontalAlignment = Alignment.CenterHorizontally
+                                        ) {
+                                            Text(
+                                                text = strings.modeTitle,
+                                                style = MaterialTheme.typography.labelMedium,
+                                                color = OnDarkSurfaceVariant,
+                                                fontWeight = FontWeight.SemiBold
                                             )
+                                            Spacer(Modifier.height(8.dp))
+                                            Row(
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                val modeItems = listOf(
+                                                    OperationMode.TUN to "TUN",
+                                                    OperationMode.SYSTEM_PROXY to "Системный прокси",
+                                                    OperationMode.PROXY_ONLY to "Только прокси"
+                                                )
+                                                modeItems.forEach { (mode, label) ->
+                                                    val selected = settings.operationMode == mode
+                                                    FilterChip(
+                                                        selected = selected,
+                                                        onClick = { AppStateStore.setOperationMode(mode) },
+                                                        label = { Text(label, fontSize = 12.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal) },
+                                                        colors = FilterChipDefaults.filterChipColors(
+                                                            selectedContainerColor = NeonCyan.copy(alpha = 0.25f),
+                                                            selectedLabelColor = NeonCyan
+                                                        ),
+                                                        border = FilterChipDefaults.filterChipBorder(
+                                                            enabled = true,
+                                                            selected = selected,
+                                                            borderColor = if (selected) NeonCyan else Color.Transparent
+                                                        )
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    // Realtime Speed Stats
+                                    SpeedRow(
+                                        rxSpeedBps = stats.rxSpeedBps,
+                                        txSpeedBps = stats.txSpeedBps
+                                    )
+
+                                    // Selected Server Card
+                                    if (activeProfile != null) {
+                                        ServerCard(
+                                            profile = activeProfile,
+                                            isSelected = true,
+                                            onSelect = { currentScreen = Screen.SERVERS }
+                                        )
+                                    } else {
+                                        Surface(
+                                            shape = RoundedCornerShape(12.dp),
+                                            color = DarkSurface,
+                                            modifier = Modifier.fillMaxWidth().clickable { currentScreen = Screen.SERVERS }
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(16.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.Center
+                                            ) {
+                                                Text(
+                                                    text = strings.noProfileSelected,
+                                                    color = OnDarkSurfaceVariant,
+                                                    fontWeight = FontWeight.SemiBold
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -275,13 +395,20 @@ fun App() {
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Text(
-                                            text = "Servers (${profiles.size})",
+                                            text = "${strings.serversTitle} (${profiles.size})",
                                             style = MaterialTheme.typography.titleLarge,
                                             fontWeight = FontWeight.Bold,
                                             color = OnDarkSurface
                                         )
-                                        TextButton(onClick = { currentScreen = Screen.SUBSCRIPTIONS }) {
-                                            Text("+ Add Node", color = NeonCyan)
+                                        Button(
+                                            onClick = { currentScreen = Screen.SUBSCRIPTIONS },
+                                            colors = ButtonDefaults.buttonColors(containerColor = NeonCyan, contentColor = Color.Black),
+                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                            shape = RoundedCornerShape(8.dp)
+                                        ) {
+                                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                                            Spacer(Modifier.width(4.dp))
+                                            Text(strings.addServer, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                         }
                                     }
 
@@ -291,7 +418,7 @@ fun App() {
                                         verticalArrangement = Arrangement.spacedBy(10.dp),
                                         modifier = Modifier.fillMaxSize()
                                     ) {
-                                        items(profiles) { profile ->
+                                        items(profiles, key = { it.id }) { profile ->
                                             Row(
                                                 modifier = Modifier.fillMaxWidth(),
                                                 verticalAlignment = Alignment.CenterVertically
@@ -312,7 +439,7 @@ fun App() {
                                                 ) {
                                                     Icon(
                                                         Icons.Default.Edit,
-                                                        contentDescription = "Edit Config",
+                                                        contentDescription = strings.editServer,
                                                         tint = OnDarkSurfaceVariant
                                                     )
                                                 }
@@ -329,14 +456,17 @@ fun App() {
                                         .padding(20.dp)
                                 ) {
                                     Text(
-                                        text = "Subscriptions & Import",
+                                        text = strings.subscriptionsTitle,
                                         style = MaterialTheme.typography.titleLarge,
                                         fontWeight = FontWeight.Bold,
                                         color = OnDarkSurface
                                     )
-                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Spacer(modifier = Modifier.height(4.dp))
                                     Text(
-                                        text = "Import 3x-ui subscription URL, or paste vless://, mdns://, vkturn://, hy2:// links",
+                                        text = if (settings.language.code == "ru")
+                                            "Импорт подписок 3x-ui по URL или единичных ссылок mdns://, vkturn://, hy2://, vless://"
+                                        else
+                                            "Import 3x-ui subscription URL or single node links (mdns://, vkturn://, hy2://, vless://)",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = OnDarkSurfaceVariant
                                     )
@@ -353,6 +483,7 @@ fun App() {
                                         placeholder = { Text("https://... or vless:// or mdns://...") },
                                         singleLine = true,
                                         modifier = Modifier.fillMaxWidth(),
+                                        shape = RoundedCornerShape(10.dp),
                                         colors = OutlinedTextFieldDefaults.colors(
                                             focusedBorderColor = NeonCyan,
                                             unfocusedBorderColor = DarkSurfaceVariant,
@@ -372,7 +503,6 @@ fun App() {
                                         onClick = {
                                             val input = newSubUrl.trim()
                                             if (input.startsWith("http://") || input.startsWith("https://")) {
-                                                // Fetch remote subscription
                                                 isSubLoading = true
                                                 scope.launch {
                                                     val res = subscriptionManager.fetchSubscription(input, newSubName.ifBlank { null })
@@ -386,7 +516,6 @@ fun App() {
                                                     }
                                                 }
                                             } else {
-                                                // Single Link import
                                                 val profile = ProtocolRegistry.parse(input)
                                                 if (profile != null) {
                                                     AppStateStore.addProfile(profile)
@@ -399,15 +528,19 @@ fun App() {
                                         },
                                         enabled = !isSubLoading && newSubUrl.isNotBlank(),
                                         modifier = Modifier.fillMaxWidth(),
+                                        shape = RoundedCornerShape(10.dp),
                                         colors = ButtonDefaults.buttonColors(containerColor = NeonCyan, contentColor = Color.Black)
                                     ) {
-                                        Text(if (isSubLoading) "Importing..." else "Import to NullVP", fontWeight = FontWeight.Bold)
+                                        Text(
+                                            if (isSubLoading) "Importing..." else strings.addSubscription,
+                                            fontWeight = FontWeight.Bold
+                                        )
                                     }
 
-                                    Spacer(modifier = Modifier.height(24.dp))
+                                    Spacer(modifier = Modifier.height(20.dp))
 
                                     Text(
-                                        text = "Active Subscriptions (${subscriptions.size})",
+                                        text = "${strings.subscriptionsTitle} (${subscriptions.size})",
                                         style = MaterialTheme.typography.titleMedium,
                                         fontWeight = FontWeight.Bold,
                                         color = OnDarkSurface
@@ -419,7 +552,7 @@ fun App() {
                                         verticalArrangement = Arrangement.spacedBy(10.dp),
                                         modifier = Modifier.fillMaxSize()
                                     ) {
-                                        items(subscriptions) { sub ->
+                                        items(subscriptions, key = { it.id }) { sub ->
                                             SubscriptionCard(
                                                 subscription = sub,
                                                 onRefresh = {
@@ -440,55 +573,11 @@ fun App() {
                             }
 
                             Screen.SETTINGS -> {
-                                SettingsScreen(
-                                    settings = settings,
-                                    onSettingsChanged = { AppStateStore.updateSettings(it) }
-                                )
+                                SettingsScreen()
                             }
 
                             Screen.LOGS -> {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .padding(20.dp)
-                                ) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            text = "Core Engine Logs",
-                                            style = MaterialTheme.typography.titleLarge,
-                                            fontWeight = FontWeight.Bold,
-                                            color = OnDarkSurface
-                                        )
-                                        Text(
-                                            text = "${logs.size} entries",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = OnDarkSurfaceVariant
-                                        )
-                                    }
-                                    Spacer(modifier = Modifier.height(14.dp))
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .background(DarkSurfaceVariant)
-                                            .padding(14.dp)
-                                    ) {
-                                        LazyColumn(modifier = Modifier.fillMaxSize()) {
-                                            items(logs) { logLine ->
-                                                Text(
-                                                    text = logLine,
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    color = if (logLine.contains("ERROR", true) || logLine.contains("ERR", true)) CyberRed else CyberGreen
-                                                )
-                                                Spacer(modifier = Modifier.height(2.dp))
-                                            }
-                                        }
-                                    }
-                                }
+                                LogsScreen()
                             }
                         }
                     }

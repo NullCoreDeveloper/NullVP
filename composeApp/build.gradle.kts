@@ -64,6 +64,7 @@ kotlin {
                 implementation(compose.desktop.currentOs)
                 implementation(libs.kotlinx.coroutines.swing)
                 implementation(libs.ktor.client.cio)
+                implementation("dev.nucleusframework:composenativetray:2.1.7")
             }
         }
     }

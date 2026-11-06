@@ -29,10 +29,14 @@ mkdir -p "$APPIMAGE_BUILD_DIR/bin"
 cp "$ROOT_DIR/core-bridge/bin/nullvp-core" "$APPIMAGE_BUILD_DIR/bin/"
 chmod +x "$APPIMAGE_BUILD_DIR/bin/nullvp-core"
 
-# Копируем геобазы
+# Копируем геобазы и нативные библиотеки трея
 mkdir -p "$APPIMAGE_BUILD_DIR/lib/app/resources/assets"
+mkdir -p "$APPIMAGE_BUILD_DIR/lib/app/resources/composetray"
 if [ -d "$ROOT_DIR/composeApp/src/desktopMain/resources/assets" ]; then
     cp "$ROOT_DIR/composeApp/src/desktopMain/resources/assets"/*.dat "$APPIMAGE_BUILD_DIR/lib/app/resources/assets/" 2>/dev/null || true
+fi
+if [ -d "$ROOT_DIR/composeApp/src/desktopMain/resources/composetray" ]; then
+    cp -r "$ROOT_DIR/composeApp/src/desktopMain/resources/composetray"/* "$APPIMAGE_BUILD_DIR/lib/app/resources/composetray/" 2>/dev/null || true
 fi
 
 # Создаем AppRun
@@ -41,6 +45,7 @@ cat << 'EOF' > "$APPIMAGE_BUILD_DIR/AppRun"
 HERE="$(dirname "$(readlink -f "${0}")")"
 export APPDIR="${APPDIR:-$HERE}"
 export PATH="$HERE/bin:$PATH"
+export LD_LIBRARY_PATH="$HERE/lib/app:$HERE/lib/app/resources/composetray/native/linux-x64:$LD_LIBRARY_PATH"
 exec "$HERE/bin/NullVP" "$@"
 EOF
 chmod +x "$APPIMAGE_BUILD_DIR/AppRun"
@@ -75,5 +80,11 @@ fi
 ARCH=x86_64 "$APPIMAGETOOL_BIN" --no-appstream $RUNTIME_ARG "$APPIMAGE_BUILD_DIR" "$OUTPUT_APPIMAGE"
 chmod +x "$OUTPUT_APPIMAGE"
 
-echo "=== Готово! AppImage: $OUTPUT_APPIMAGE ==="
-ls -lh "$OUTPUT_APPIMAGE"
+echo "=== 5. Создание портативного tar.gz и копирование Android APK ==="
+if [ -f "$ROOT_DIR/composeApp/build/outputs/apk/debug/composeApp-debug.apk" ]; then
+    cp -f "$ROOT_DIR/composeApp/build/outputs/apk/debug/composeApp-debug.apk" "$DIST_DIR/NullVP-v1.0.0-android.apk"
+fi
+tar -czf "$DIST_DIR/NullVP-v1.0.0-linux-x86_64.tar.gz" -C "$BUILD_DIR/app" NullVP
+
+echo "=== Готово! Релизные файлы в $DIST_DIR: ==="
+ls -lh "$DIST_DIR"

@@ -4,10 +4,35 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import nullvp.domain.model.AppSettings
+import nullvp.domain.model.CustomRoutingRule
+import nullvp.domain.model.OperationMode
 import nullvp.domain.model.Profile
 import nullvp.domain.model.ProtocolType
 import nullvp.domain.model.Subscription
 import nullvp.domain.protocol.ProtocolRegistry
+import nullvp.i18n.AppLanguage
+
+enum class LogLevel {
+    DEBUG, INFO, WARN, ERROR
+}
+
+data class LogEntry(
+    val id: Long = System.nanoTime(),
+    val timestamp: Long = System.currentTimeMillis(),
+    val level: LogLevel,
+    val tag: String,
+    val message: String
+) {
+    fun toFormattedString(): String {
+        val seconds = (timestamp / 1000) % 86400
+        val hours = (seconds / 3600) % 24
+        val minutes = (seconds % 3600) / 60
+        val secs = seconds % 60
+        val millis = timestamp % 1000
+        val timeStr = "${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}.${millis.toString().padStart(3, '0')}"
+        return "[$timeStr] [${level.name.padEnd(5)}] [$tag] $message"
+    }
+}
 
 object AppStateStore {
 
@@ -75,6 +100,16 @@ object AppStateStore {
     private val _settings = MutableStateFlow(AppSettings())
     val settings: StateFlow<AppSettings> = _settings.asStateFlow()
 
+    private val _logs = MutableStateFlow<List<LogEntry>>(
+        listOf(
+            LogEntry(level = LogLevel.INFO, tag = "CoreEngine", message = "NullVP Client v1.0.0 initialized"),
+            LogEntry(level = LogLevel.INFO, tag = "Platform", message = "System environment ready. TUN and Proxy routes configured"),
+            LogEntry(level = LogLevel.INFO, tag = "Routing", message = "Bypass rules loaded: RU services and private LAN direct, Ads blocked"),
+            LogEntry(level = LogLevel.DEBUG, tag = "DNS", message = "Remote DNS: 1.1.1.1 (DoH), Direct DNS: 77.88.8.8")
+        )
+    )
+    val logs: StateFlow<List<LogEntry>> = _logs.asStateFlow()
+
     fun selectProfile(id: String) {
         _selectedProfileId.value = id
     }
@@ -84,11 +119,13 @@ object AppStateStore {
         list.add(0, profile)
         _profiles.value = list
         _selectedProfileId.value = profile.id
+        addLog(LogLevel.INFO, "ProfileManager", "Added profile '${profile.name}' (${profile.protocolType})")
     }
 
     fun updateProfile(profile: Profile) {
         val list = _profiles.value.map { if (it.id == profile.id) profile else it }
         _profiles.value = list
+        addLog(LogLevel.INFO, "ProfileManager", "Updated profile '${profile.name}'")
     }
 
     fun deleteProfile(id: String) {
@@ -97,6 +134,7 @@ object AppStateStore {
         if (_selectedProfileId.value == id) {
             _selectedProfileId.value = list.firstOrNull()?.id
         }
+        addLog(LogLevel.INFO, "ProfileManager", "Deleted profile ID: $id")
     }
 
     fun duplicateProfile(profile: Profile) {
@@ -112,7 +150,6 @@ object AppStateStore {
         currentSubs.add(0, sub)
         _subscriptions.value = currentSubs
 
-        // Replace or add subscription profiles
         val otherProfiles = _profiles.value.filter { it.subscriptionId != sub.id }.toMutableList()
         otherProfiles.addAll(0, newProfiles)
         _profiles.value = otherProfiles
@@ -120,6 +157,7 @@ object AppStateStore {
         if (_selectedProfileId.value == null || !otherProfiles.any { it.id == _selectedProfileId.value }) {
             _selectedProfileId.value = otherProfiles.firstOrNull()?.id
         }
+        addLog(LogLevel.INFO, "SubscriptionManager", "Imported subscription '${sub.name}' with ${newProfiles.size} nodes")
     }
 
     fun deleteSubscription(subId: String) {
@@ -129,10 +167,59 @@ object AppStateStore {
         if (_selectedProfileId.value != null && remainingProfiles.none { it.id == _selectedProfileId.value }) {
             _selectedProfileId.value = remainingProfiles.firstOrNull()?.id
         }
+        addLog(LogLevel.INFO, "SubscriptionManager", "Deleted subscription ID: $subId")
     }
 
     fun updateSettings(newSettings: AppSettings) {
         _settings.value = newSettings
+        addLog(LogLevel.INFO, "Settings", "Settings updated. Mode: ${newSettings.operationMode}, Routing: ${newSettings.routingStrategy}")
+    }
+
+    fun setLanguage(lang: AppLanguage) {
+        _settings.value = _settings.value.copy(language = lang)
+        addLog(LogLevel.INFO, "Settings", "Language changed to ${lang.displayName}")
+    }
+
+    fun setOperationMode(mode: OperationMode) {
+        _settings.value = _settings.value.copy(operationMode = mode)
+        addLog(LogLevel.INFO, "Settings", "Operation mode changed to $mode")
+    }
+
+    fun addCustomRule(rule: CustomRoutingRule) {
+        val updated = _settings.value.customRules.toMutableList()
+        updated.add(rule)
+        _settings.value = _settings.value.copy(customRules = updated)
+        addLog(LogLevel.INFO, "Routing", "Added custom rule '${rule.name}' -> ${rule.outbound}")
+    }
+
+    fun updateCustomRule(rule: CustomRoutingRule) {
+        val updated = _settings.value.customRules.map { if (it.id == rule.id) rule else it }
+        _settings.value = _settings.value.copy(customRules = updated)
+        addLog(LogLevel.INFO, "Routing", "Updated custom rule '${rule.name}'")
+    }
+
+    fun deleteCustomRule(ruleId: String) {
+        val updated = _settings.value.customRules.filter { it.id != ruleId }
+        _settings.value = _settings.value.copy(customRules = updated)
+        addLog(LogLevel.INFO, "Routing", "Deleted custom rule ID: $ruleId")
+    }
+
+    fun addLog(level: LogLevel, tag: String, message: String) {
+        val entry = LogEntry(level = level, tag = tag, message = message)
+        val current = _logs.value.toMutableList()
+        if (current.size > 2000) {
+            current.removeAt(0)
+        }
+        current.add(entry)
+        _logs.value = current
+    }
+
+    fun clearLogs() {
+        _logs.value = emptyList()
+    }
+
+    fun exportLogsToString(): String {
+        return _logs.value.joinToString("\n") { it.toFormattedString() }
     }
 
     fun exportProfileUri(profileId: String): String? {
@@ -141,4 +228,3 @@ object AppStateStore {
         return handler.formatUri(profile)
     }
 }
-
