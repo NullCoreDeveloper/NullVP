@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"encoding/base64"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -26,6 +27,7 @@ func main() {
 	socketPath := flag.String("socket", "/tmp/nullvp-core.sock", "UNIX socket path for IPC")
 	socksPort := flag.Int("socks-port", 10808, "Local SOCKS5 proxy port")
 	httpPort := flag.Int("http-port", 10809, "Local HTTP proxy port")
+	localPort := flag.Int("local-port", 0, "Local listening port for tunnel")
 	configPath := flag.String("c", "", "Path to active JSON configuration")
 	protoType := flag.String("proto", "", "Protocol type: VK_TURN or MASTER_DNS")
 	flag.Parse()
@@ -44,6 +46,13 @@ func main() {
 			if err != nil {
 				log.Printf("[NULLVP-CORE] Failed to read config %s: %v", *configPath, err)
 			} else {
+				var cfgMap map[string]interface{}
+				if err := json.Unmarshal(content, &cfgMap); err == nil {
+					if *localPort > 0 {
+						cfgMap["localPort"] = *localPort
+					}
+					content, _ = json.Marshal(cfgMap)
+				}
 				b64 := base64.StdEncoding.EncodeToString(content)
 				log.Printf("[NULLVP-CORE] Launching protocol %s", *protoType)
 				if err := nullvpcore.StartProfile(*protoType, b64, 0, ""); err != nil {

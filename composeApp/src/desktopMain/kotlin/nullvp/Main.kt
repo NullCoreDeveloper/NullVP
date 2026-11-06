@@ -12,33 +12,39 @@ import nullvp.i18n.Localization
 import nullvp.platform.DesktopPrivilegeManager
 import nullvp.tray.DesktopTrayIcon
 
+import nullvp.core.getPlatformCoreEngine
+
 fun main() = application {
+    val engine = remember { getPlatformCoreEngine() }
+    val isRunning by engine.isRunning.collectAsState()
+    val isConnecting by engine.isConnecting.collectAsState()
+    val profiles by AppStateStore.profiles.collectAsState()
+    val selectedProfileId by AppStateStore.selectedProfileId.collectAsState()
+    val activeProfile = profiles.firstOrNull { it.id == selectedProfileId }
+
     var isWindowVisible by remember { mutableStateOf(true) }
-    var isConnected by remember { mutableStateOf(false) }
     val windowState = rememberWindowState(width = 1020.dp, height = 720.dp)
 
     val settings by AppStateStore.settings.collectAsState()
     val strings = Localization.get(settings.language)
 
     // Desktop System Tray Icon
-    val trayIcon = remember(isConnected) {
-        DesktopTrayIcon.createIcon(isConnected)
+    val trayIcon = remember(isRunning) {
+        DesktopTrayIcon.createIcon(isRunning)
     }
 
     // Native Wayland & X11 System Tray (libLinuxTray.so + StatusNotifierItem DBus)
     Tray(
         icon = trayIcon,
-        tooltip = "NullVP — ${if (isConnected) strings.statusConnected else strings.statusDisconnected}",
+        tooltip = "NullVP — ${if (isRunning) "${strings.statusConnected} (${activeProfile?.name ?: ""})" else strings.statusDisconnected}",
         primaryAction = {
             // Left click: Toggle window visibility and restore
-            isWindowVisible = !isWindowVisible
-            if (isWindowVisible) {
-                windowState.isMinimized = false
-            }
+            isWindowVisible = true
+            windowState.isMinimized = false
         }
     ) {
         Item(
-            label = if (isWindowVisible) "Свернуть в трей" else "Открыть NullVP",
+            label = if (isWindowVisible) "Скрыть окно" else "Открыть NullVP",
             onClick = {
                 isWindowVisible = !isWindowVisible
                 if (isWindowVisible) {
@@ -48,18 +54,19 @@ fun main() = application {
         )
         Divider()
         Item(
-            label = if (isConnected) "⏹ ${strings.btnDisconnect}" else "▶ ${strings.btnConnect}",
+            label = if (isRunning) "⏹ ${strings.btnDisconnect}" else "▶ ${strings.btnConnect}",
+            isEnabled = !isConnecting,
             onClick = {
-                isConnected = !isConnected
-                if (isConnected) {
-                    when (settings.operationMode) {
-                        OperationMode.SYSTEM_PROXY -> DesktopPrivilegeManager.enableSystemProxy()
-                        OperationMode.TUN -> DesktopPrivilegeManager.startElevatedDaemon("/usr/bin/nullvp-core", "/tmp/nullvp-core.sock")
-                        OperationMode.PROXY_ONLY -> { /* local proxy only */ }
-                    }
+                if (isRunning) {
+                    engine.stop()
                 } else {
-                    DesktopPrivilegeManager.disableSystemProxy()
-                    DesktopPrivilegeManager.stopDaemon()
+                    val p = profiles.firstOrNull { it.id == selectedProfileId } ?: profiles.firstOrNull()
+                    if (p != null) {
+                        engine.start(p)
+                    } else {
+                        isWindowVisible = true
+                        windowState.isMinimized = false
+                    }
                 }
             }
         )
@@ -82,8 +89,7 @@ fun main() = application {
         Item(
             label = if (settings.language.code == "ru") "Выход" else "Quit",
             onClick = {
-                DesktopPrivilegeManager.disableSystemProxy()
-                DesktopPrivilegeManager.stopDaemon()
+                engine.stop()
                 exitApplication()
             }
         )

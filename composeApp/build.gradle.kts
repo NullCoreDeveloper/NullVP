@@ -65,6 +65,7 @@ kotlin {
                 implementation(libs.kotlinx.coroutines.swing)
                 implementation(libs.ktor.client.cio)
                 implementation("dev.nucleusframework:composenativetray:2.1.7")
+                implementation("org.slf4j:slf4j-nop:2.0.16")
             }
         }
     }
@@ -103,9 +104,16 @@ android {
 compose.desktop {
     application {
         mainClass = "nullvp.MainKt"
+        jvmArgs += listOf(
+            "-Dfile.encoding=UTF-8",
+            "-Dstdout.encoding=UTF-8",
+            "-Djdk.gtk.version=3",
+            "-Djdk.lang.Process.launchMechanism=vfork"
+        )
 
         nativeDistributions {
-            targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
+            modules("java.base", "java.desktop", "java.logging", "java.net.http", "java.sql", "jdk.unsupported")
+            targetFormats(TargetFormat.AppImage, TargetFormat.Deb, TargetFormat.Msi, TargetFormat.Dmg)
             packageName = "NullVP"
             packageVersion = "1.0.0"
             description = "NullVP Cross-Platform Modern VPN Client"

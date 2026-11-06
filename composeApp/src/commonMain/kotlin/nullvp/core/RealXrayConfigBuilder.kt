@@ -8,7 +8,7 @@ import nullvp.domain.model.ProtocolType
 object RealXrayConfigBuilder {
     private val json = Json { prettyPrint = true }
 
-    fun buildJson(profile: Profile, settings: AppSettings): String {
+    fun buildJson(profile: Profile, settings: AppSettings, localRelayPort: Int = 10815): String {
         val root = buildJsonObject {
             // 1. Log configuration
             putJsonObject("log") {
@@ -50,7 +50,7 @@ object RealXrayConfigBuilder {
 
             // 3. Outbounds (Proxy, Direct, Block)
             putJsonArray("outbounds") {
-                add(buildProxyOutbound(profile, settings))
+                add(buildProxyOutbound(profile, settings, localRelayPort))
 
                 // Freedom / Direct outbound
                 addJsonObject {
@@ -161,7 +161,7 @@ object RealXrayConfigBuilder {
         return json.encodeToString(JsonObject.serializer(), root)
     }
 
-    private fun buildProxyOutbound(profile: Profile, settings: AppSettings): JsonObject {
+    private fun buildProxyOutbound(profile: Profile, settings: AppSettings, localRelayPort: Int = 10815): JsonObject {
         // Try parsing protocol raw config as JSON if available
         val rawJson: JsonObject? = runCatching {
             Json.parseToJsonElement(profile.protocolRawConfig).jsonObject
@@ -304,14 +304,79 @@ object RealXrayConfigBuilder {
                     }
                 }
 
-                else -> {
-                    // For MDNS, VK-TURN or SOCKS upstream
+                ProtocolType.VK_TURN -> {
+                    val wgStr = rawJson?.get("wgConf")?.jsonPrimitive?.contentOrNull
+                        ?: rawJson?.get("wg")?.jsonPrimitive?.contentOrNull
+                    val targetProto = rawJson?.get("targetProtocol")?.jsonPrimitive?.contentOrNull
+                        ?: rawJson?.get("protocol")?.jsonPrimitive?.contentOrNull
+
+                    val isWireguard = !wgStr.isNullOrBlank() || targetProto.equals("wireguard", true) || rawJson?.containsKey("secretKey") == true
+
+                    if (isWireguard) {
+                        var privKey = rawJson?.get("secretKey")?.jsonPrimitive?.contentOrNull ?: ""
+                        var pubKey = rawJson?.get("publicKey")?.jsonPrimitive?.contentOrNull ?: ""
+                        var address = rawJson?.get("address")?.jsonPrimitive?.contentOrNull ?: "10.0.0.2/32"
+
+                        if (privKey.isBlank() && !wgStr.isNullOrBlank()) {
+                            for (line in wgStr.lines()) {
+                                val trimmed = line.trim()
+                                val lower = trimmed.lowercase()
+                                if (lower.startsWith("privatekey")) {
+                                    privKey = trimmed.substringAfter("=").trim()
+                                } else if (lower.startsWith("publickey")) {
+                                    pubKey = trimmed.substringAfter("=").trim()
+                                } else if (lower.startsWith("address")) {
+                                    address = trimmed.substringAfter("=").trim()
+                                }
+                            }
+                        }
+
+                        put("protocol", "wireguard")
+                        putJsonObject("settings") {
+                            put("secretKey", privKey)
+                            putJsonArray("address") {
+                                add(address)
+                            }
+                            putJsonArray("peers") {
+                                addJsonObject {
+                                    put("publicKey", pubKey)
+                                    put("endpoint", "127.0.0.1:$localRelayPort")
+                                }
+                            }
+                        }
+                    } else {
+                        put("protocol", "socks")
+                        putJsonObject("settings") {
+                            putJsonArray("servers") {
+                                addJsonObject {
+                                    put("address", "127.0.0.1")
+                                    put("port", localRelayPort)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                ProtocolType.MASTER_DNS -> {
                     put("protocol", "socks")
                     putJsonObject("settings") {
                         putJsonArray("servers") {
                             addJsonObject {
                                 put("address", "127.0.0.1")
-                                put("port", 10810) // local relay port from nullvp-core
+                                put("port", localRelayPort)
+                            }
+                        }
+                    }
+                }
+
+                else -> {
+                    // For upstream relay via local port
+                    put("protocol", "socks")
+                    putJsonObject("settings") {
+                        putJsonArray("servers") {
+                            addJsonObject {
+                                put("address", "127.0.0.1")
+                                put("port", localRelayPort)
                             }
                         }
                     }

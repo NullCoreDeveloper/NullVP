@@ -24,6 +24,47 @@ rm -rf "$APPIMAGE_BUILD_DIR"
 mkdir -p "$APPIMAGE_BUILD_DIR"
 cp -a "$APP_DIR"/* "$APPIMAGE_BUILD_DIR"/
 
+# Копируем runtime java если доступен в системе
+JAVA_BIN="$(readlink -f /usr/bin/java 2>/dev/null || which java 2>/dev/null || true)"
+if [ -n "$JAVA_BIN" ] && [ -x "$JAVA_BIN" ]; then
+    mkdir -p "$APPIMAGE_BUILD_DIR/lib/runtime/bin"
+    cp -f "$JAVA_BIN" "$APPIMAGE_BUILD_DIR/lib/runtime/bin/java" 2>/dev/null || true
+    chmod +x "$APPIMAGE_BUILD_DIR/lib/runtime/bin/java" || true
+fi
+
+# Заменяем C++ jpackage лаунчер на надежный скрипт запуска (исправляет pure virtual method crash на Wayland)
+cat << 'EOF' > "$APPIMAGE_BUILD_DIR/bin/NullVP"
+#!/bin/sh
+APPDIR="$(dirname "$(dirname "$(readlink -f "$0")")")"
+RUNTIME="$APPDIR/lib/runtime"
+if [ -x "$RUNTIME/bin/java" ]; then
+    JAVA_EXEC="$RUNTIME/bin/java"
+elif command -v java >/dev/null 2>&1; then
+    JAVA_EXEC="java"
+elif [ -x "/usr/lib/jvm/default/bin/java" ]; then
+    JAVA_EXEC="/usr/lib/jvm/default/bin/java"
+else
+    echo "Error: Java runtime not found" >&2
+    exit 1
+fi
+exec "$JAVA_EXEC" \
+    -Dfile.encoding=UTF-8 \
+    -Dstdout.encoding=UTF-8 \
+    -Djdk.gtk.version=3 \
+    -Djdk.lang.Process.launchMechanism=vfork \
+    -Dapp.dir="$APPDIR" \
+    -Dskiko.library.path="$APPDIR/lib/app" \
+    -Dcompose.application.resources.dir="$APPDIR/lib/app/resources" \
+    -Dcompose.application.configure.swing.globals=true \
+    -Djpackage.app-version=1.0.0 \
+    -cp "$APPDIR/lib/app/*" \
+    nullvp.MainKt \
+    "$@"
+EOF
+chmod +x "$APPIMAGE_BUILD_DIR/bin/NullVP"
+mkdir -p "$APP_DIR/bin"
+cp -f "$APPIMAGE_BUILD_DIR/bin/NullVP" "$APP_DIR/bin/NullVP"
+
 # Копируем бинарники реальных ядер (xray, tun2socks, nullvp-core)
 mkdir -p "$APPIMAGE_BUILD_DIR/bin"
 cp -f "$ROOT_DIR/bin/xray" "$APPIMAGE_BUILD_DIR/bin/" 2>/dev/null || true
@@ -31,15 +72,18 @@ cp -f "$ROOT_DIR/bin/tun2socks" "$APPIMAGE_BUILD_DIR/bin/" 2>/dev/null || true
 cp -f "$ROOT_DIR/bin/nullvp-core" "$APPIMAGE_BUILD_DIR/bin/" 2>/dev/null || cp -f "$ROOT_DIR/core-bridge/bin/nullvp-core" "$APPIMAGE_BUILD_DIR/bin/" 2>/dev/null || true
 chmod +x "$APPIMAGE_BUILD_DIR/bin"/* || true
 
-# Копируем геобазы и нативные библиотеки трея
+# Копируем геобазы, иконку и нативные библиотеки трея
+mkdir -p "$APPIMAGE_BUILD_DIR/assets"
 mkdir -p "$APPIMAGE_BUILD_DIR/lib/app/resources/assets"
 mkdir -p "$APPIMAGE_BUILD_DIR/lib/app/resources/composetray"
 if [ -d "$ROOT_DIR/composeApp/src/desktopMain/resources/assets" ]; then
+    cp "$ROOT_DIR/composeApp/src/desktopMain/resources/assets"/*.dat "$APPIMAGE_BUILD_DIR/assets/" 2>/dev/null || true
     cp "$ROOT_DIR/composeApp/src/desktopMain/resources/assets"/*.dat "$APPIMAGE_BUILD_DIR/lib/app/resources/assets/" 2>/dev/null || true
 fi
 if [ -d "$ROOT_DIR/composeApp/src/desktopMain/resources/composetray" ]; then
     cp -r "$ROOT_DIR/composeApp/src/desktopMain/resources/composetray"/* "$APPIMAGE_BUILD_DIR/lib/app/resources/composetray/" 2>/dev/null || true
 fi
+cp -f "$ROOT_DIR/composeApp/src/desktopMain/resources/icon.png" "$APPIMAGE_BUILD_DIR/lib/app/resources/icon.png" 2>/dev/null || true
 
 # Создаем AppRun
 cat << 'EOF' > "$APPIMAGE_BUILD_DIR/AppRun"
@@ -47,7 +91,6 @@ cat << 'EOF' > "$APPIMAGE_BUILD_DIR/AppRun"
 HERE="$(dirname "$(readlink -f "${0}")")"
 export APPDIR="${APPDIR:-$HERE}"
 export PATH="$HERE/bin:$PATH"
-export LD_LIBRARY_PATH="$HERE/lib/app:$HERE/lib/app/resources/composetray/native/linux-x64:$LD_LIBRARY_PATH"
 exec "$HERE/bin/NullVP" "$@"
 EOF
 chmod +x "$APPIMAGE_BUILD_DIR/AppRun"

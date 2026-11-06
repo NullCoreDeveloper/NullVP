@@ -101,7 +101,14 @@ class VkTurnProtocolHandler : ProtocolHandler {
     }
 
     override fun toCoreConfigJson(profile: Profile): String {
-        return profile.protocolRawConfig
+        return runCatching {
+            val element = json.parseToJsonElement(profile.protocolRawConfig).jsonObject
+            buildJsonObject {
+                element.forEach { (k, v) -> put(k, v) }
+                if (!element.containsKey("server")) put("server", profile.serverAddress)
+                if (!element.containsKey("port")) put("port", profile.serverPort)
+            }.toString()
+        }.getOrDefault(profile.protocolRawConfig)
     }
 
     private fun decodeBase64Payload(raw: String): String {

@@ -117,11 +117,34 @@ object DesktopPrivilegeManager {
     // System Proxy Management (Zero Root Rights)
     // ==========================================
 
-    fun enableSystemProxy(host: String = "127.0.0.1", port: Int = 10808) {
+    private val hasKWriteConfig6 by lazy {
+        File("/usr/bin/kwriteconfig6").exists() || checkCommand("kwriteconfig6")
+    }
+
+    private val hasKWriteConfig5 by lazy {
+        File("/usr/bin/kwriteconfig5").exists() || checkCommand("kwriteconfig5")
+    }
+
+    private val hasGSettings by lazy {
+        File("/usr/bin/gsettings").exists() || checkCommand("gsettings")
+    }
+
+    private val hasQdbus6 by lazy {
+        File("/usr/bin/qdbus6").exists() || checkCommand("qdbus6")
+    }
+
+    private fun checkCommand(cmd: String): Boolean {
+        return runCatching {
+            val proc = ProcessBuilder("which", cmd).start()
+            proc.waitFor() == 0
+        }.getOrDefault(false)
+    }
+
+    fun enableSystemProxy(socksPort: Int = 10808, httpPort: Int = 10809, host: String = "127.0.0.1") {
         if (isLinux) {
-            enableLinuxProxy(host, port)
+            enableLinuxProxy(host, socksPort, httpPort)
         } else if (isWindows) {
-            enableWindowsProxy(host, port)
+            enableWindowsProxy(host, socksPort, httpPort)
         }
     }
 
@@ -133,27 +156,58 @@ object DesktopPrivilegeManager {
         }
     }
 
-    private fun enableLinuxProxy(host: String, port: Int) {
-        runCatching {
-            // GNOME / Cinnamon / Mate
-            ProcessBuilder("gsettings", "set", "org.gnome.system.proxy", "mode", "'manual'").start().waitFor()
-            ProcessBuilder("gsettings", "set", "org.gnome.system.proxy.socks", "host", "'$host'").start().waitFor()
-            ProcessBuilder("gsettings", "set", "org.gnome.system.proxy.socks", "port", port.toString()).start().waitFor()
+    private fun enableLinuxProxy(host: String, socksPort: Int, httpPort: Int) {
+        // 1. KDE Plasma 6 / 5 (kwriteconfig)
+        if (hasKWriteConfig6 || hasKWriteConfig5) {
+            runCatching {
+                val kwrite = if (hasKWriteConfig6) "kwriteconfig6" else "kwriteconfig5"
+                ProcessBuilder(kwrite, "--file", "kioslaverc", "--group", "Proxy Settings", "--key", "ProxyType", "1").start().waitFor()
+                ProcessBuilder(kwrite, "--file", "kioslaverc", "--group", "Proxy Settings", "--key", "httpProxy", "http://$host $httpPort").start().waitFor()
+                ProcessBuilder(kwrite, "--file", "kioslaverc", "--group", "Proxy Settings", "--key", "httpsProxy", "http://$host $httpPort").start().waitFor()
+                ProcessBuilder(kwrite, "--file", "kioslaverc", "--group", "Proxy Settings", "--key", "socksProxy", "socks://$host $socksPort").start().waitFor()
+                if (hasQdbus6) {
+                    ProcessBuilder("qdbus6", "org.kde.kded6", "/kded", "org.kde.kded6.reparseConfiguration", "kioslave").start().waitFor()
+                }
+            }
+        }
+
+        // 2. GNOME / Cinnamon / Mate (gsettings)
+        if (hasGSettings) {
+            runCatching {
+                ProcessBuilder("gsettings", "set", "org.gnome.system.proxy", "mode", "manual").start().waitFor()
+                ProcessBuilder("gsettings", "set", "org.gnome.system.proxy.http", "host", host).start().waitFor()
+                ProcessBuilder("gsettings", "set", "org.gnome.system.proxy.http", "port", httpPort.toString()).start().waitFor()
+                ProcessBuilder("gsettings", "set", "org.gnome.system.proxy.https", "host", host).start().waitFor()
+                ProcessBuilder("gsettings", "set", "org.gnome.system.proxy.https", "port", httpPort.toString()).start().waitFor()
+                ProcessBuilder("gsettings", "set", "org.gnome.system.proxy.socks", "host", host).start().waitFor()
+                ProcessBuilder("gsettings", "set", "org.gnome.system.proxy.socks", "port", socksPort.toString()).start().waitFor()
+            }
         }
     }
 
     private fun disableLinuxProxy() {
-        runCatching {
-            ProcessBuilder("gsettings", "set", "org.gnome.system.proxy", "mode", "'none'").start().waitFor()
+        if (hasKWriteConfig6 || hasKWriteConfig5) {
+            runCatching {
+                val kwrite = if (hasKWriteConfig6) "kwriteconfig6" else "kwriteconfig5"
+                ProcessBuilder(kwrite, "--file", "kioslaverc", "--group", "Proxy Settings", "--key", "ProxyType", "0").start().waitFor()
+                if (hasQdbus6) {
+                    ProcessBuilder("qdbus6", "org.kde.kded6", "/kded", "org.kde.kded6.reparseConfiguration", "kioslave").start().waitFor()
+                }
+            }
+        }
+        if (hasGSettings) {
+            runCatching {
+                ProcessBuilder("gsettings", "set", "org.gnome.system.proxy", "mode", "none").start().waitFor()
+            }
         }
     }
 
-    private fun enableWindowsProxy(host: String, port: Int) {
+    private fun enableWindowsProxy(host: String, socksPort: Int, httpPort: Int) {
         runCatching {
-            // Set proxy in Windows Registry via reg command
             val regKey = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings"
+            val proxyServer = "http=$host:$httpPort;https=$host:$httpPort;socks=$host:$socksPort"
             ProcessBuilder("reg", "add", regKey, "/v", "ProxyEnable", "/t", "REG_DWORD", "/d", "1", "/f").start().waitFor()
-            ProcessBuilder("reg", "add", regKey, "/v", "ProxyServer", "/t", "REG_SZ", "/d", "socks=$host:$port", "/f").start().waitFor()
+            ProcessBuilder("reg", "add", regKey, "/v", "ProxyServer", "/t", "REG_SZ", "/d", proxyServer, "/f").start().waitFor()
         }
     }
 

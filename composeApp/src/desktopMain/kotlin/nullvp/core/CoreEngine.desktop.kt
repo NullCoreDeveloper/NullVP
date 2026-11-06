@@ -38,12 +38,15 @@ class DesktopCoreEngine : CoreEngine {
     override val currentCaptchaUrl: StateFlow<String?> = _currentCaptchaUrl.asStateFlow()
 
     private var coreProcess: Process? = null
+    private var companionProcess: Process? = null
     private var tunProcess: Process? = null
     private var statsJob: Job? = null
     private var logJob: Job? = null
+    private var companionLogJob: Job? = null
 
     companion object {
         private const val CONFIG_PATH = "/tmp/nullvp_active.json"
+        private const val DRIVER_CONFIG_PATH = "/tmp/nullvp_driver.json"
         private const val TUN_DEVICE = "nullvp0"
     }
 
@@ -79,7 +82,7 @@ class DesktopCoreEngine : CoreEngine {
         runCatching {
             ProcessBuilder("pkill", "-9", "-f", "xray.*$CONFIG_PATH").start().waitFor(500, TimeUnit.MILLISECONDS)
             ProcessBuilder("pkill", "-9", "-f", "tun2socks.*$TUN_DEVICE").start().waitFor(500, TimeUnit.MILLISECONDS)
-            ProcessBuilder("pkill", "-9", "-f", "nullvp-core.*$CONFIG_PATH").start().waitFor(500, TimeUnit.MILLISECONDS)
+            ProcessBuilder("pkill", "-9", "-f", "nullvp-core.*").start().waitFor(500, TimeUnit.MILLISECONDS)
         }
     }
 
@@ -95,18 +98,20 @@ class DesktopCoreEngine : CoreEngine {
                 appendLog("[START] Preparing profile '${profile.name}' (${profile.protocolType})")
                 AppStateStore.addLog(LogLevel.INFO, "CoreEngine", "Building configuration for '${profile.name}'")
 
-                // 1. Build real JSON configuration
-                val configContent = RealXrayConfigBuilder.buildJson(profile, settings)
+                val isCustomDriver = profile.protocolType == ProtocolType.MASTER_DNS || profile.protocolType == ProtocolType.VK_TURN
+                val localRelayPort = if (isCustomDriver) {
+                    runCatching { java.net.ServerSocket(0).use { it.localPort } }.getOrDefault(10815)
+                } else 10815
+
+                // 1. Build real Xray configuration
+                val configContent = RealXrayConfigBuilder.buildJson(profile, settings, localRelayPort)
                 val configFile = File(CONFIG_PATH)
                 configFile.writeText(configContent)
                 appendLog("[CONFIG] Generated config at $CONFIG_PATH (${configContent.length} bytes)")
 
-                // 2. Select appropriate binary
-                val isCustomDriver = profile.protocolType == ProtocolType.MASTER_DNS || profile.protocolType == ProtocolType.VK_TURN
-                val binaryName = if (isCustomDriver) "nullvp-core" else "xray"
-                val binary = findBinary(binaryName) ?: findBinary("xray")
-                if (binary == null) {
-                    val err = "Executable binary '$binaryName' not found! Make sure ./bin/$binaryName exists."
+                val xrayBinary = findBinary("xray")
+                if (xrayBinary == null) {
+                    val err = "Executable binary 'xray' not found! Make sure ./bin/xray exists."
                     appendLog("[ERROR] $err")
                     AppStateStore.addLog(LogLevel.ERROR, "CoreEngine", err)
                     _isConnecting.value = false
@@ -114,20 +119,63 @@ class DesktopCoreEngine : CoreEngine {
                     return@launch
                 }
 
-                // 3. Launch Core Process
-                val assetDir = findAssetDir()
-                val pb = if (isCustomDriver) {
-                    ProcessBuilder(
-                        binary.absolutePath,
+                // If custom tunnel driver (VK_TURN or MASTER_DNS), start nullvp-core first
+                if (isCustomDriver) {
+                    val nullvpBinary = findBinary("nullvp-core")
+                    if (nullvpBinary == null) {
+                        val err = "Binary 'nullvp-core' not found for protocol ${profile.protocolType}!"
+                        appendLog("[ERROR] $err")
+                        AppStateStore.addLog(LogLevel.ERROR, "CoreEngine", err)
+                        _isConnecting.value = false
+                        _connectionError.value = err
+                        return@launch
+                    }
+
+                    val driverConfigFile = File(DRIVER_CONFIG_PATH)
+                    driverConfigFile.writeText(profile.protocolRawConfig)
+
+                    val driverPb = ProcessBuilder(
+                        nullvpBinary.absolutePath,
                         "-socks-port", settings.socksPort.toString(),
                         "-http-port", settings.httpPort.toString(),
-                        "-c", configFile.absolutePath,
+                        "-local-port", localRelayPort.toString(),
+                        "-c", driverConfigFile.absolutePath,
                         "-proto", profile.protocolType.name
                     )
-                } else {
-                    ProcessBuilder(binary.absolutePath, "run", "-c", configFile.absolutePath)
+                    driverPb.redirectErrorStream(true)
+                    val cProc = driverPb.start()
+                    companionProcess = cProc
+
+                    companionLogJob?.cancel()
+                    companionLogJob = scope.launch(Dispatchers.IO) {
+                        try {
+                            BufferedReader(InputStreamReader(cProc.inputStream)).use { reader ->
+                                var line: String? = null
+                                while (reader.readLine().also { line = it } != null) {
+                                    line?.let { l ->
+                                        appendLog("[CORE] $l")
+                                        val lvl = if (l.contains("error", true) || l.contains("failed", true)) LogLevel.ERROR
+                                        else if (l.contains("warning", true)) LogLevel.WARN
+                                        else LogLevel.INFO
+                                        AppStateStore.addLog(lvl, "NullvpCore", l)
+
+                                        if (l.contains("[CAPTCHA_REQUIRED]")) {
+                                            val url = l.substringAfter("[CAPTCHA_REQUIRED]").trim()
+                                            _currentCaptchaUrl.value = url
+                                            AppStateStore.addLog(LogLevel.WARN, "VK_TURN", "Требуется решение капчи: $url")
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (_: Exception) {}
+                    }
+
+                    delay(400)
                 }
 
+                // 2. Launch Xray Process
+                val assetDir = findAssetDir()
+                val pb = ProcessBuilder(xrayBinary.absolutePath, "run", "-c", configFile.absolutePath)
                 if (assetDir != null) {
                     pb.environment()["XRAY_LOCATION_ASSET"] = assetDir.absolutePath
                 }
@@ -148,13 +196,7 @@ class DesktopCoreEngine : CoreEngine {
                                     val lvl = if (l.contains("error", true) || l.contains("failed", true)) LogLevel.ERROR
                                     else if (l.contains("warning", true)) LogLevel.WARN
                                     else LogLevel.INFO
-                                    AppStateStore.addLog(lvl, if (isCustomDriver) "NullvpCore" else "XrayCore", l)
-
-                                    if (l.contains("[CAPTCHA_REQUIRED]")) {
-                                        val url = l.substringAfter("[CAPTCHA_REQUIRED]").trim()
-                                        _currentCaptchaUrl.value = url
-                                        AppStateStore.addLog(LogLevel.WARN, "VK_TURN", "Требуется решение капчи: $url")
-                                    }
+                                    AppStateStore.addLog(lvl, "XrayCore", l)
 
                                     if (l.contains("Failed to start:") || l.contains("fatal error")) {
                                         _connectionError.value = l.substringAfter("Failed to start:").trim()
@@ -180,11 +222,11 @@ class DesktopCoreEngine : CoreEngine {
                 _isRunning.value = true
                 _isConnecting.value = false
 
-                // 4. Handle System Routing Mode
+                // 3. Handle System Routing Mode
                 when (settings.operationMode) {
                     OperationMode.SYSTEM_PROXY -> {
-                        DesktopPrivilegeManager.enableSystemProxy("127.0.0.1", settings.socksPort)
-                        appendLog("[PROXY] System proxy enabled on 127.0.0.1:${settings.socksPort}")
+                        DesktopPrivilegeManager.enableSystemProxy(settings.socksPort, settings.httpPort)
+                        appendLog("[PROXY] System proxy enabled on 127.0.0.1:${settings.socksPort} (SOCKS) / ${settings.httpPort} (HTTP)")
                         AppStateStore.addLog(LogLevel.INFO, "Routing", "OS System Proxy active on 127.0.0.1:${settings.socksPort}")
                     }
                     OperationMode.TUN -> {
@@ -196,7 +238,7 @@ class DesktopCoreEngine : CoreEngine {
                     }
                 }
 
-                // 5. Start Real Traffic Stats Poller
+                // 4. Start Real Traffic Stats Poller
                 startStatsPolling(settings.operationMode)
             } catch (e: Exception) {
                 _isRunning.value = false
@@ -212,7 +254,7 @@ class DesktopCoreEngine : CoreEngine {
         val tunBinary = findBinary("tun2socks")
         if (tunBinary == null) {
             appendLog("[WARN] tun2socks binary not found, falling back to System Proxy mode")
-            DesktopPrivilegeManager.enableSystemProxy("127.0.0.1", socksPort)
+            DesktopPrivilegeManager.enableSystemProxy(socksPort = socksPort)
             return
         }
 
@@ -340,11 +382,16 @@ class DesktopCoreEngine : CoreEngine {
 
                 // Kill processes
                 coreProcess?.destroy()
+                companionProcess?.destroy()
                 tunProcess?.destroy()
                 killExistingZombieProcesses()
 
                 coreProcess = null
+                companionProcess = null
                 tunProcess = null
+
+                companionLogJob?.cancel()
+                companionLogJob = null
 
                 _stats.value = TrafficStats(isConnected = false)
                 appendLog("[STOP] Stopped successfully")
@@ -357,10 +404,12 @@ class DesktopCoreEngine : CoreEngine {
     override fun submitCaptcha(token: String) {
         appendLog("[CAPTCHA] Token submitted: ${token.take(8)}...")
         scope.launch(Dispatchers.IO) {
-            coreProcess?.outputStream?.let { os ->
-                runCatching {
-                    os.write("CAPTCHA $token\n".toByteArray())
-                    os.flush()
+            listOfNotNull(companionProcess, coreProcess).forEach { p ->
+                p.outputStream?.let { os ->
+                    runCatching {
+                        os.write("CAPTCHA $token\n".toByteArray())
+                        os.flush()
+                    }
                 }
             }
         }

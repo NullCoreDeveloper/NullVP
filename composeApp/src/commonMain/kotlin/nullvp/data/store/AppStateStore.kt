@@ -47,49 +47,12 @@ data class LogEntry(
 
 object AppStateStore {
 
-    private val defaultProfiles = listOf(
-        Profile(
-            id = "default_mdns",
-            name = "NullDNS Turbo (Russia Bypass)",
-            serverAddress = "ns1.tunnel.cloud",
-            serverPort = 18000,
-            protocolType = ProtocolType.MASTER_DNS,
-            protocolRawConfig = "{\"DOMAINS\":[\"ns1.tunnel.cloud\"],\"DATA_ENCRYPTION_METHOD\":1,\"ENCRYPTION_KEY\":\"defaultKey\",\"LISTEN_PORT\":18000}",
-            pingMs = 45
-        ),
-        Profile(
-            id = "default_vkturn",
-            name = "VK TURN Relay (Opus Audio)",
-            serverAddress = "turn.vk.me",
-            serverPort = 443,
-            protocolType = ProtocolType.VK_TURN,
-            protocolRawConfig = "{\"v\":1,\"name\":\"VK TURN Relay\",\"peer\":\"1.2.3.4:443\",\"vk\":\"https://vk.com/call/join/test\",\"n\":3}",
-            pingMs = 28
-        ),
-        Profile(
-            id = "default_hy2",
-            name = "Hysteria 2 High-Speed Node",
-            serverAddress = "hy2.node.vpn",
-            serverPort = 8443,
-            protocolType = ProtocolType.HYSTERIA2,
-            protocolRawConfig = "{\"server\":\"hy2.node.vpn:8443\",\"auth\":\"secretPass\",\"sni\":\"cloudflare.com\",\"insecure\":false}",
-            pingMs = 52
-        ),
-        Profile(
-            id = "default_vless",
-            name = "Frankfurt Reality (Xray XTLS)",
-            serverAddress = "de1.node.vpn",
-            serverPort = 443,
-            protocolType = ProtocolType.VLESS,
-            protocolRawConfig = "{\"uuid\":\"11111111-2222-3333-4444-555555555555\",\"host\":\"de1.node.vpn\",\"port\":443,\"query\":\"security=reality&type=tcp\"}",
-            pingMs = 74
-        )
-    )
+    private val defaultProfiles: List<Profile> = emptyList()
 
     private val _profiles = MutableStateFlow<List<Profile>>(defaultProfiles)
     val profiles: StateFlow<List<Profile>> = _profiles.asStateFlow()
 
-    private val _selectedProfileId = MutableStateFlow<String?>(defaultProfiles.firstOrNull()?.id)
+    private val _selectedProfileId = MutableStateFlow<String?>(null)
     val selectedProfileId: StateFlow<String?> = _selectedProfileId.asStateFlow()
 
     private val _subscriptions = MutableStateFlow<List<Subscription>>(emptyList())
@@ -108,9 +71,7 @@ object AppStateStore {
         if (!savedJson.isNullOrBlank()) {
             runCatching {
                 val loaded = jsonSerializer.decodeFromString(SavedAppState.serializer(), savedJson)
-                if (loaded.profiles.isNotEmpty()) {
-                    _profiles.value = loaded.profiles
-                }
+                _profiles.value = loaded.profiles
                 _subscriptions.value = loaded.subscriptions
                 _selectedProfileId.value = loaded.selectedProfileId ?: loaded.profiles.firstOrNull()?.id
                 _settings.value = loaded.settings
