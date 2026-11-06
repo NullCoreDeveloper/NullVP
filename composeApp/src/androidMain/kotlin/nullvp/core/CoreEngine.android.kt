@@ -3,32 +3,21 @@ package nullvp.core
 import android.content.Context
 import android.content.Intent
 import android.net.VpnService
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
+import nullvp.MainActivity
+import nullvp.data.store.AppStateStore
 import nullvp.domain.model.Profile
 import nullvp.domain.model.TrafficStats
 import nullvp.service.NullVpnService
 
 class AndroidCoreEngine(private var appContext: Context? = null) : CoreEngine {
 
-    private val _isRunning = MutableStateFlow(false)
-    override val isRunning: StateFlow<Boolean> = _isRunning.asStateFlow()
-
-    private val _isConnecting = MutableStateFlow(false)
-    override val isConnecting: StateFlow<Boolean> = _isConnecting.asStateFlow()
-
-    private val _connectionError = MutableStateFlow<String?>(null)
-    override val connectionError: StateFlow<String?> = _connectionError.asStateFlow()
-
-    private val _stats = MutableStateFlow(TrafficStats())
-    override val stats: StateFlow<TrafficStats> = _stats.asStateFlow()
-
-    private val _logs = MutableStateFlow<List<String>>(listOf("[INIT] Android VPN Engine Initialized"))
-    override val logs: StateFlow<List<String>> = _logs.asStateFlow()
-
-    private val _currentCaptchaUrl = MutableStateFlow<String?>(null)
-    override val currentCaptchaUrl: StateFlow<String?> = _currentCaptchaUrl.asStateFlow()
+    override val isRunning: StateFlow<Boolean> = AndroidCoreBridge.isRunning
+    override val isConnecting: StateFlow<Boolean> = AndroidCoreBridge.isConnecting
+    override val connectionError: StateFlow<String?> = AndroidCoreBridge.connectionError
+    override val stats: StateFlow<TrafficStats> = AndroidCoreBridge.stats
+    override val logs: StateFlow<List<String>> = AndroidCoreBridge.logs
+    override val currentCaptchaUrl: StateFlow<String?> = AndroidCoreBridge.currentCaptchaUrl
 
     fun setContext(context: Context) {
         this.appContext = context.applicationContext
@@ -39,16 +28,25 @@ class AndroidCoreEngine(private var appContext: Context? = null) : CoreEngine {
 
         val prepareIntent = VpnService.prepare(ctx)
         if (prepareIntent != null) {
-            // Need user consent via activity
-            return Result.failure(SecurityException("VPN consent needed"))
+            MainActivity.instance?.let { act ->
+                MainActivity.pendingProfile = profile
+                MainActivity.vpnPermissionLauncher?.launch(prepareIntent)
+                return Result.failure(SecurityException("VPN permission consent requested"))
+            } ?: return Result.failure(SecurityException("VPN consent needed"))
         }
+
+        AndroidCoreBridge.activeProfile = profile
+        AndroidCoreBridge.appSettings = AppStateStore.settings.value
+        AndroidCoreBridge.setConnecting(true)
 
         val serviceIntent = Intent(ctx, NullVpnService::class.java).apply {
             action = NullVpnService.ACTION_START
-            putExtra(NullVpnService.EXTRA_PROFILE_NAME, profile.name)
         }
-        ctx.startService(serviceIntent)
-        _isRunning.value = true
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            ctx.startForegroundService(serviceIntent)
+        } else {
+            ctx.startService(serviceIntent)
+        }
         return Result.success(Unit)
     }
 
@@ -58,21 +56,18 @@ class AndroidCoreEngine(private var appContext: Context? = null) : CoreEngine {
             action = NullVpnService.ACTION_STOP
         }
         ctx.startService(serviceIntent)
-        _isRunning.value = false
-        _stats.value = TrafficStats(isConnected = false)
         return Result.success(Unit)
     }
 
     override fun submitCaptcha(token: String) {
-        _currentCaptchaUrl.value = null
+        AndroidCoreBridge.submitCaptchaToken(token)
     }
 }
 
-private val androidEngineInstance = AndroidCoreEngine()
+val androidEngineInstance = AndroidCoreEngine()
 
 actual fun getPlatformCoreEngine(): CoreEngine = androidEngineInstance
 
 fun initializeAndroidCoreEngine(context: Context) {
     androidEngineInstance.setContext(context)
 }
-

@@ -50,6 +50,7 @@ kotlin {
         
         val androidMain by getting {
             dependencies {
+                implementation(files("libs/libv2ray.aar"))
                 implementation(compose.uiTooling)
                 implementation(libs.androidx.activity.compose)
                 implementation(libs.androidx.core.ktx)

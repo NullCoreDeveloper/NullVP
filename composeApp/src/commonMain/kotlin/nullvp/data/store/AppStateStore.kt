@@ -3,6 +3,9 @@ package nullvp.data.store
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.*
 import nullvp.domain.model.AppSettings
@@ -60,6 +63,9 @@ object AppStateStore {
 
     private val _settings = MutableStateFlow(AppSettings())
     val settings: StateFlow<AppSettings> = _settings.asStateFlow()
+
+    private val _routingSettingsChanged = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val routingSettingsChanged: SharedFlow<Unit> = _routingSettingsChanged.asSharedFlow()
 
     private val jsonSerializer = Json {
         prettyPrint = true
@@ -257,9 +263,35 @@ object AppStateStore {
     }
 
     fun updateSettings(newSettings: AppSettings) {
+        val old = _settings.value
+        val routingChanged = old.routingStrategy != newSettings.routingStrategy ||
+                old.blockAds != newSettings.blockAds ||
+                old.bypassLan != newSettings.bypassLan ||
+                old.bypassRu != newSettings.bypassRu ||
+                old.dynamicRuAppScannerEnabled != newSettings.dynamicRuAppScannerEnabled ||
+                old.socksPort != newSettings.socksPort ||
+                old.httpPort != newSettings.httpPort ||
+                old.proxyAuthEnabled != newSettings.proxyAuthEnabled ||
+                old.proxyUsername != newSettings.proxyUsername ||
+                old.proxyPassword != newSettings.proxyPassword ||
+                old.customRules != newSettings.customRules ||
+                old.remoteDns != newSettings.remoteDns ||
+                old.directDns != newSettings.directDns ||
+                old.fakeDns != newSettings.fakeDns ||
+                old.sniffingEnabled != newSettings.sniffingEnabled ||
+                old.fragmentEnabled != newSettings.fragmentEnabled ||
+                old.fragmentPackets != newSettings.fragmentPackets ||
+                old.fragmentLength != newSettings.fragmentLength ||
+                old.fragmentInterval != newSettings.fragmentInterval ||
+                old.muxEnabled != newSettings.muxEnabled ||
+                old.muxConcurrency != newSettings.muxConcurrency
+
         _settings.value = newSettings
         saveState()
         addLog(LogLevel.INFO, "Settings", "Settings updated. Mode: ${newSettings.operationMode}, Routing: ${newSettings.routingStrategy}")
+        if (routingChanged) {
+            _routingSettingsChanged.tryEmit(Unit)
+        }
     }
 
     fun setLanguage(lang: AppLanguage) {
@@ -269,9 +301,13 @@ object AppStateStore {
     }
 
     fun setOperationMode(mode: OperationMode) {
+        val oldMode = _settings.value.operationMode
         _settings.value = _settings.value.copy(operationMode = mode)
         saveState()
         addLog(LogLevel.INFO, "Settings", "Operation mode changed to $mode")
+        if (oldMode != mode) {
+            _routingSettingsChanged.tryEmit(Unit)
+        }
     }
 
     fun addCustomRule(rule: CustomRoutingRule) {
@@ -280,6 +316,7 @@ object AppStateStore {
         _settings.value = _settings.value.copy(customRules = updated)
         saveState()
         addLog(LogLevel.INFO, "Routing", "Added custom rule '${rule.name}' -> ${rule.outbound}")
+        _routingSettingsChanged.tryEmit(Unit)
     }
 
     fun updateCustomRule(rule: CustomRoutingRule) {
@@ -287,6 +324,7 @@ object AppStateStore {
         _settings.value = _settings.value.copy(customRules = updated)
         saveState()
         addLog(LogLevel.INFO, "Routing", "Updated custom rule '${rule.name}'")
+        _routingSettingsChanged.tryEmit(Unit)
     }
 
     fun deleteCustomRule(ruleId: String) {
@@ -294,6 +332,7 @@ object AppStateStore {
         _settings.value = _settings.value.copy(customRules = updated)
         saveState()
         addLog(LogLevel.INFO, "Routing", "Deleted custom rule ID: $ruleId")
+        _routingSettingsChanged.tryEmit(Unit)
     }
 
     fun addLog(level: LogLevel, tag: String, message: String) {

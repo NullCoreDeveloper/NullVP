@@ -30,6 +30,7 @@ import kotlinx.coroutines.launch
 import nullvp.core.getPlatformCoreEngine
 import nullvp.data.protocol.*
 import nullvp.data.store.AppStateStore
+import nullvp.data.store.LogLevel
 import nullvp.data.subscription.SubscriptionManager
 import nullvp.domain.model.OperationMode
 import nullvp.domain.model.Profile
@@ -86,6 +87,17 @@ fun App() {
     val connectionError by coreEngine.connectionError.collectAsState()
     val stats by coreEngine.stats.collectAsState()
     val captchaUrl by coreEngine.currentCaptchaUrl.collectAsState()
+
+    // Auto-restart VPN tunnel immediately when routing rules or settings change
+    LaunchedEffect(isRunning, selectedProfileId) {
+        AppStateStore.routingSettingsChanged.collect {
+            val active = AppStateStore.profiles.value.find { it.id == AppStateStore.selectedProfileId.value }
+            if (isRunning && active != null) {
+                AppStateStore.addLog(LogLevel.INFO, "Routing", "Правила маршрутизации изменены: мгновенный перезапуск туннеля...")
+                coreEngine.start(active)
+            }
+        }
+    }
 
     val strings = Localization.get(settings.language)
 

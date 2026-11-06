@@ -71,6 +71,8 @@ data class AppStrings(
     val bypassLanDesc: String,
     val bypassRu: String,
     val bypassRuDesc: String,
+    val dynamicRuAppScanner: String,
+    val dynamicRuAppScannerDesc: String,
 
     // Custom Rules
     val rulesTitle: String,
@@ -214,6 +216,8 @@ val RussianStrings = AppStrings(
     bypassLanDesc = "Прямой доступ к домашним и корпоративным IP (192.168.x, 10.x, 127.x)",
     bypassRu = "Обход сервисов РФ",
     bypassRuDesc = "Трафик к ресурсам РФ по geoip:ru и geosite:category-gov-ru/banks напрямую",
+    dynamicRuAppScanner = "Динамический сканер приложений РФ (v2whitelist)",
+    dynamicRuAppScannerDesc = "Исключает приложения банков РФ и госуслуг напрямую (4PDA принудительно через VPN)",
 
     rulesTitle = "Пользовательские правила маршрутизации",
     addRule = "Добавить правило",
@@ -349,6 +353,8 @@ val EnglishStrings = AppStrings(
     bypassLanDesc = "Direct connection to private subnets (192.168.x, 10.x, 127.x)",
     bypassRu = "Bypass Russian Services",
     bypassRuDesc = "Direct route to Russian IPs via geoip:ru and geosite:category-gov-ru/banks",
+    dynamicRuAppScanner = "Dynamic RU App Scanner (v2whitelist)",
+    dynamicRuAppScannerDesc = "Bypasses RU banking & state apps directly (forces 4PDA through VPN)",
 
     rulesTitle = "Custom Routing Rules",
     addRule = "Add Rule",

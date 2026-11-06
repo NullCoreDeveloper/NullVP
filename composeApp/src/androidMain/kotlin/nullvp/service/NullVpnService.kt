@@ -8,30 +8,52 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.ServiceInfo
 import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.os.SystemClock
+import android.provider.Settings
+import android.util.Base64
 import androidx.core.app.NotificationCompat
+import com.v2ray.ang.service.TProxyService
+import go.Seq
 import kotlinx.coroutines.*
+import kotlinx.serialization.json.*
+import libv2ray.CoreCallbackHandler
+import libv2ray.CoreController
+import libv2ray.Libv2ray
 import nullvp.MainActivity
+import nullvp.core.AndroidCoreBridge
+import nullvp.core.RealXrayConfigBuilder
+import nullvp.domain.model.Profile
+import nullvp.domain.model.ProtocolType
+import java.io.File
+import java.io.FileOutputStream
 import java.util.concurrent.atomic.AtomicBoolean
 
 class NullVpnService : VpnService() {
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var vpnInterface: ParcelFileDescriptor? = null
+    private var tproxyService: TProxyService? = null
+    private var coreController: CoreController? = null
+    private var statsJob: Job? = null
+
     private val isStopping = AtomicBoolean(false)
     private var sleptMillis = 0L
 
-    // Screen-on broadcast receiver to detect sleep gaps > 60s and wake the core
+    private var totalRx = 0L
+    private var totalTx = 0L
+
+    // Screen-on broadcast receiver to detect sleep gaps > 60s
     private val screenOnReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             val slept = SystemClock.elapsedRealtime() - SystemClock.uptimeMillis()
             val gap = slept - sleptMillis
             sleptMillis = slept
             if (gap >= DEEP_SLEEP_KICK_MS) {
-                // Wake kick
+                AndroidCoreBridge.addLog("[VPN] Wake kick from deep sleep (${gap}ms)")
             }
         }
     }
@@ -40,6 +62,55 @@ class NullVpnService : VpnService() {
         super.onCreate()
         createNotificationChannel()
         registerReceiver(screenOnReceiver, IntentFilter(Intent.ACTION_SCREEN_ON))
+        initCoreEnv()
+    }
+
+    private fun initCoreEnv() {
+        runCatching {
+            Seq.setContext(applicationContext)
+
+            val assetDir = File(
+                getExternalFilesDir("assets")?.absolutePath
+                    ?: getDir("assets", Context.MODE_PRIVATE).absolutePath
+            )
+            if (!assetDir.exists()) assetDir.mkdirs()
+
+            // Copy Geo assets from APK assets if missing
+            val geoFiles = listOf("geosite.dat", "geoip.dat", "geoip-only-cn-private.dat")
+            geoFiles.forEach { fileName ->
+                val target = File(assetDir, fileName)
+                if (!target.exists() || target.length() == 0L) {
+                    runCatching {
+                        assets.open(fileName).use { input ->
+                            FileOutputStream(target).use { output ->
+                                input.copyTo(output)
+                            }
+                        }
+                        AndroidCoreBridge.addLog("[ASSET] Extracted $fileName to storage")
+                    }
+                }
+            }
+
+            val deviceId = try {
+                val aid = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID) ?: "nullvp_device"
+                Base64.encodeToString(aid.toByteArray(Charsets.UTF_8).copyOf(32), Base64.NO_PADDING or Base64.URL_SAFE)
+            } catch (_: Exception) {
+                "nullvp_device_key_0000000000000000"
+            }
+
+            Libv2ray.initCoreEnv(assetDir.absolutePath, deviceId)
+
+            Libv2ray.setCaptchaHandler(object : libv2ray.CaptchaHandler {
+                override fun openCaptcha(url: String?) {
+                    if (!url.isNullOrBlank()) {
+                        AndroidCoreBridge.setCaptchaUrl(url)
+                    }
+                }
+            })
+            AndroidCoreBridge.addLog("[CORE] Native environment initialized")
+        }.onFailure {
+            AndroidCoreBridge.addLog("[CORE] Failed to init native env: ${it.message}")
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -47,8 +118,13 @@ class NullVpnService : VpnService() {
 
         when (action) {
             ACTION_START -> {
-                val profileName = intent.getStringExtra(EXTRA_PROFILE_NAME) ?: "VPN"
-                startVpn(profileName)
+                val profile = AndroidCoreBridge.activeProfile
+                if (profile == null) {
+                    AndroidCoreBridge.setError("No active server profile selected")
+                    stopSelf()
+                    return START_NOT_STICKY
+                }
+                startVpn(profile)
             }
             ACTION_STOP -> {
                 stopVpn()
@@ -57,35 +133,280 @@ class NullVpnService : VpnService() {
         return START_NOT_STICKY
     }
 
-    private fun startVpn(profileName: String) {
-        if (vpnInterface != null) return
-        isStopping.set(false)
+    private fun startVpn(profile: Profile) {
+        scope.launch {
+            try {
+                // If core is already running, gracefully tear it down first to reload new rules/profile
+                stopCoreAndTProxy()
 
-        val notification = createNotification("Connected to $profileName")
-        startForeground(NOTIFICATION_ID, notification)
+                isStopping.set(false)
+                val notification = createNotification("Connected: ${profile.name}")
+                if (Build.VERSION.SDK_INT >= 34) {
+                    startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+                } else {
+                    startForeground(NOTIFICATION_ID, notification)
+                }
+
+                val settings = AndroidCoreBridge.appSettings
+
+                // 1. Configure and establish Android VPN Tun Interface
+                val builder = Builder()
+                    .setSession("NullVP")
+                    .setMtu(settings.tunMtu)
+                    .addAddress("10.10.10.2", 30)
+                    .addRoute("0.0.0.0", 0)
+
+                // Add DNS
+                val dns = if (settings.directDns.isNotBlank()) settings.directDns else "1.1.1.1"
+                if (dns.matches(Regex("\\d+\\.\\d+\\.\\d+\\.\\d+"))) {
+                    builder.addDnsServer(dns)
+                } else {
+                    builder.addDnsServer("1.1.1.1")
+                }
+                builder.addDnsServer("8.8.8.8")
+
+                // Configure IPv6 if enabled
+                if (settings.enableIpv6) {
+                    runCatching {
+                        builder.addAddress("fc00::2", 126)
+                        builder.addRoute("::", 0)
+                    }
+                }
+
+                // 2. Split Tunneling & Dynamic App Scanner (v2whitelist logic)
+                applySplitTunneling(builder)
+
+                // Close previous interface if open
+                vpnInterface?.close()
+                val pfd = builder.establish() ?: error("Failed to establish VPN interface")
+                vpnInterface = pfd
+
+                // 3. Handle Special Drivers (VK_TURN / MASTER_DNS)
+                var localRelayPort = 10815
+                if (profile.protocolType == ProtocolType.VK_TURN) {
+                    localRelayPort = (20000..50000).random()
+                    val raw = profile.protocolRawConfig
+                    val updatedJson = runCatching {
+                        val parsed = Json.parseToJsonElement(raw).jsonObject.toMutableMap()
+                        parsed["localPort"] = JsonPrimitive(localRelayPort)
+                        JsonObject(parsed).toString()
+                    }.getOrDefault(raw)
+
+                    val b64 = Base64.encodeToString(updatedJson.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
+                    val filesDir = applicationContext.filesDir.absolutePath
+                    AndroidCoreBridge.addLog("[VKTURN] Starting internal VK TURN engine on :$localRelayPort")
+                    Libv2ray.startVkTurnClient(b64, "", filesDir)
+                    if (!Libv2ray.isVkTurnClientRunning()) {
+                        error("VK TURN client failed to start")
+                    }
+                } else if (profile.protocolType == ProtocolType.MASTER_DNS) {
+                    localRelayPort = (20000..50000).random()
+                    val raw = profile.protocolRawConfig
+                    val updatedJson = runCatching {
+                        val parsed = Json.parseToJsonElement(raw).jsonObject.toMutableMap()
+                        parsed["LISTEN_PORT"] = JsonPrimitive(localRelayPort)
+                        JsonObject(parsed).toString()
+                    }.getOrDefault(raw)
+
+                    val b64 = Base64.encodeToString(updatedJson.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
+                    val filesDir = applicationContext.filesDir.absolutePath
+                    AndroidCoreBridge.addLog("[MDNS] Starting internal MDNS engine on :$localRelayPort")
+                    Libv2ray.startMdnsClient(b64, "", filesDir)
+                }
+
+                // 4. Build Real Xray configuration
+                val configContent = RealXrayConfigBuilder.buildJson(profile, settings, localRelayPort)
+                AndroidCoreBridge.addLog("[XRAY] Config generated (${configContent.length} chars)")
+
+                // 5. Start hev-socks5-tunnel JNI
+                tproxyService = TProxyService(applicationContext, pfd)
+                tproxyService?.startTun2Socks(
+                    socksPort = settings.socksPort,
+                    socksUsername = if (settings.proxyAuthEnabled) settings.proxyUsername else null,
+                    socksPassword = if (settings.proxyAuthEnabled) settings.proxyPassword else null,
+                    mtu = settings.tunMtu
+                )
+                AndroidCoreBridge.addLog("[TPROXY] hev-socks5-tunnel started on port ${settings.socksPort}")
+
+                // 6. Start Core Controller
+                val callback = object : CoreCallbackHandler {
+                    override fun startup(): Long {
+                        AndroidCoreBridge.addLog("[XRAY] Core loop active")
+                        return 0
+                    }
+
+                    override fun shutdown(): Long {
+                        AndroidCoreBridge.addLog("[XRAY] Core loop stopped")
+                        return 0
+                    }
+
+                    override fun onEmitStatus(status: Long, msg: String?): Long {
+                        if (!msg.isNullOrBlank()) {
+                            AndroidCoreBridge.addLog("[CORE] $msg")
+                        }
+                        return 0
+                    }
+                }
+
+                val controller = Libv2ray.newCoreController(callback)
+                coreController = controller
+                controller.startLoop(configContent, 0)
+
+                AndroidCoreBridge.setRunning(true)
+                AndroidCoreBridge.addLog("[STATE] Tunnel successfully established!")
+
+                // 7. Start real-time traffic statistics poller
+                startStatsPoller(controller)
+
+            } catch (e: Exception) {
+                AndroidCoreBridge.setError("Failed to start VPN: ${e.message}")
+                stopVpn()
+            }
+        }
+    }
+
+    private fun applySplitTunneling(builder: Builder) {
+        val settings = AndroidCoreBridge.appSettings
+        val selfPackage = packageName
+
+        // Always disallow VPN's own package to prevent routing loops
+        builder.addDisallowedApplication(selfPackage)
+
+        val pm = packageManager
+        val installed = runCatching { pm.getInstalledPackages(0) }.getOrDefault(emptyList())
+
+        // 1. User Per-App Proxy Configuration
+        val isPerApp = settings.perAppProxyEnabled
+        val isBypassMode = settings.perAppBypassMode
+        val selectedPackages = settings.perAppSelectedPackages
+
+        if (isPerApp && !isBypassMode) {
+            // PROXY MODE: only selected apps go through VPN.
+            selectedPackages.forEach { pkg ->
+                runCatching { builder.addAllowedApplication(pkg) }
+            }
+            // CRITICAL REQUIREMENT: Force 4PDA through VPN even in proxy mode if present!
+            installed.forEach { pkg ->
+                val pName = pkg.packageName.lowercase()
+                if (pName.contains("4pda") || pName.contains("fourpda")) {
+                    runCatching { builder.addAllowedApplication(pkg.packageName) }
+                }
+            }
+            // When in Proxy Mode, Android automatically bypasses all other non-allowed apps.
+            return
+        }
+
+        // BYPASS MODE (or default full tunnel):
+        if (isPerApp && isBypassMode) {
+            selectedPackages.forEach { pkg ->
+                if (pkg != selfPackage) {
+                    runCatching { builder.addDisallowedApplication(pkg) }
+                }
+            }
+        }
+
+        // 2. Dynamic Russian Apps Scanner (from v2whitelist)
+        if (settings.dynamicRuAppScannerEnabled) {
+            installed.forEach { pkg ->
+                val pName = pkg.packageName.lowercase()
+
+                // CRITICAL REQUIREMENT:
+                // 4PDA starts with ru.fourpda.client, which previously got bypassed by the broad "ru." rule.
+                // We MUST EXCLUDE 4PDA from the bypass scanner so it ALWAYS routes through VPN!
+                if (pName.contains("4pda") || pName.contains("fourpda")) {
+                    return@forEach // SKIP: Do not disallow 4PDA!
+                }
+
+                val isBroadRu = pName.startsWith("ru.")
+                if (isBroadRu ||
+                    pName.contains("yandex") ||
+                    pName.contains("tinkoff") ||
+                    pName.contains("tbank") ||
+                    pName.contains("sberbank") ||
+                    pName.contains("sber") ||
+                    pName.contains("vkontakte") ||
+                    pName.contains("vk.store") ||
+                    pName.contains("rustore") ||
+                    pName.contains("ozon") ||
+                    pName.contains("wildberries") ||
+                    pName.contains("avito") ||
+                    pName.contains("alfabank") ||
+                    pName.contains("mail.ru") ||
+                    pName.contains("kinopoisk") ||
+                    pName.contains("rostel") ||
+                    pName.contains("vtb") ||
+                    pName.contains("gosuslugi") ||
+                    pName.contains("mirpay") ||
+                    pName.contains("nspk") ||
+                    pName.contains("gazprombank") ||
+                    pName.contains("raiffeisen") ||
+                    pName.contains("sovcombank") ||
+                    pName.contains("openbank") ||
+                    pName.contains("pochtabank") ||
+                    pName.contains("megafon") ||
+                    pName.contains("mts.ru") ||
+                    pName.contains("beeline") ||
+                    pName.contains("tele2")
+                ) {
+                    runCatching { builder.addDisallowedApplication(pkg.packageName) }
+                }
+            }
+        }
+    }
+
+    private fun startStatsPoller(controller: CoreController) {
+        statsJob?.cancel()
+        statsJob = scope.launch {
+            while (isActive) {
+                delay(1000)
+                try {
+                    val down = controller.queryStats("proxy", "downlink")
+                    val up = controller.queryStats("proxy", "uplink")
+                    totalRx += down
+                    totalTx += up
+                    AndroidCoreBridge.updateStats(
+                        rxBytes = totalRx,
+                        txBytes = totalTx,
+                        rxSpeed = down,
+                        txSpeed = up
+                    )
+                } catch (_: Exception) {}
+            }
+        }
+    }
+
+    private fun stopCoreAndTProxy() {
+        statsJob?.cancel()
+        statsJob = null
+
+        try {
+            tproxyService?.stopTun2Socks()
+        } catch (_: Exception) {}
+        tproxyService = null
+
+        try {
+            coreController?.stopLoop()
+        } catch (_: Exception) {}
+        coreController = null
 
         runCatching {
-            val builder = Builder()
-                .setSession("NullVP")
-                .setMtu(1500)
-                .addAddress("10.10.10.2", 24)
-                .addRoute("0.0.0.0", 0)
-                .addDnsServer("1.1.1.1")
-                .addDnsServer("8.8.8.8")
-
-            val pfd = builder.establish()
-            vpnInterface = pfd
-
-            // Core starts on the tun fd
-        }.onFailure {
-            stopVpn()
+            if (Libv2ray.isVkTurnClientRunning()) {
+                Libv2ray.stopVkTurnClient()
+            }
+        }
+        runCatching {
+            if (Libv2ray.isMdnsClientRunning()) {
+                Libv2ray.stopMdnsClient()
+            }
         }
     }
 
     private fun stopVpn() {
         if (isStopping.compareAndSet(false, true)) {
+            stopCoreAndTProxy()
             vpnInterface?.close()
             vpnInterface = null
+            AndroidCoreBridge.setRunning(false)
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
         }
@@ -100,6 +421,7 @@ class NullVpnService : VpnService() {
         super.onDestroy()
         runCatching { unregisterReceiver(screenOnReceiver) }
         scope.cancel()
+        stopCoreAndTProxy()
         vpnInterface?.close()
         vpnInterface = null
     }
@@ -137,10 +459,8 @@ class NullVpnService : VpnService() {
     companion object {
         const val ACTION_START = "nullvp.service.START"
         const val ACTION_STOP = "nullvp.service.STOP"
-        const val EXTRA_PROFILE_NAME = "extra_profile_name"
         private const val CHANNEL_ID = "nullvp_channel"
         private const val NOTIFICATION_ID = 1001
         private const val DEEP_SLEEP_KICK_MS = 60_000L
     }
 }
-

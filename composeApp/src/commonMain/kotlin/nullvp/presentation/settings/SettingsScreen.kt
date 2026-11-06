@@ -392,6 +392,13 @@ private fun RoutingCategorySection(
                 onCheckedChange = { AppStateStore.updateSettings(settings.copy(bypassRu = it)) }
             )
 
+            SettingsToggleRow(
+                title = strings.dynamicRuAppScanner,
+                subtitle = strings.dynamicRuAppScannerDesc,
+                checked = settings.dynamicRuAppScannerEnabled,
+                onCheckedChange = { AppStateStore.updateSettings(settings.copy(dynamicRuAppScannerEnabled = it)) }
+            )
+
             HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
 
             // Granular Rules Header

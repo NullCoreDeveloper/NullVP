@@ -53,6 +53,10 @@ data class AppSettings(
     val blockAds: Boolean = true,  // Block ads enabled by default!
     val bypassLan: Boolean = true,
     val bypassRu: Boolean = true,
+    val dynamicRuAppScannerEnabled: Boolean = true, // Dynamically scan & bypass RU apps (4PDA forced through VPN)
+    val perAppProxyEnabled: Boolean = false,
+    val perAppBypassMode: Boolean = true,
+    val perAppSelectedPackages: List<String> = emptyList(),
 
     // Granular Custom Routing Rules (v2dns style)
     val customRules: List<CustomRoutingRule> = defaultRoutingRules(),
