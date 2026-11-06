@@ -11,6 +11,9 @@ captures/
 .cxx
 *.apk
 *.aab
+*.AppImage
+*.dat
+dist/
 keystore.properties
 *.jks
 *.keystore
