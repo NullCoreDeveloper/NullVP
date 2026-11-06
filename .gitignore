@@ -1,0 +1,26 @@
+*.iml
+.gradle
+/build
+/*/build
+.idea/
+.DS_Store
+*.log
+local.properties
+captures/
+.externalNativeBuild
+.cxx
+*.apk
+*.aab
+keystore.properties
+*.jks
+*.keystore
+
+# Go artifacts
+/core-bridge/bin/
+/core-bridge/dist/
+/core-bridge/*.aar
+/core-bridge/*.jar
+/core-bridge/*.so
+/core-bridge/*.dll
+/core-bridge/*.dylib
+
