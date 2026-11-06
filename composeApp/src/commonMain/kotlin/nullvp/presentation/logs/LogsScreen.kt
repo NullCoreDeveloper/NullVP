@@ -3,11 +3,13 @@ package nullvp.presentation.logs
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
@@ -19,8 +21,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
@@ -29,6 +34,7 @@ import nullvp.presentation.components.NullVpTextField
 import nullvp.data.store.AppStateStore
 import nullvp.data.store.LogLevel
 import nullvp.i18n.Localization
+import nullvp.theme.*
 
 @Composable
 fun LogsScreen() {
@@ -74,12 +80,14 @@ fun LogsScreen() {
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column {
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = strings.logsTitle,
-                    style = MaterialTheme.typography.headlineMedium,
+                    style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onBackground
+                    color = MaterialTheme.colorScheme.onBackground,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                 )
                 Text(
                     text = "${filteredLogs.size} ${if (settings.language.code == "ru") "записей" else "entries"}",
@@ -88,24 +96,24 @@ fun LogsScreen() {
                 )
             }
 
+            Spacer(Modifier.width(8.dp))
+
             // Action Buttons
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
                 // Copy Button
-                Button(
+                IconButton(
                     onClick = {
                         val text = AppStateStore.exportLogsToString()
                         clipboardManager.setText(AnnotatedString(text))
                         snackbarMessage = strings.logsCopied
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-                    shape = RoundedCornerShape(8.dp)
+                    modifier = Modifier.size(36.dp)
                 ) {
-                    Text(strings.copyLogs, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Icon(PasteIcon, contentDescription = strings.copyLogs, tint = OnDarkSurfaceVariant, modifier = Modifier.size(20.dp))
                 }
 
                 // Export to File Button
-                Button(
+                IconButton(
                     onClick = {
                         try {
                             val userHome = System.getProperty("user.home") ?: "/tmp"
@@ -116,11 +124,9 @@ fun LogsScreen() {
                             snackbarMessage = "Export failed: ${e.message}"
                         }
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-                    shape = RoundedCornerShape(8.dp)
+                    modifier = Modifier.size(36.dp)
                 ) {
-                    Text(strings.exportFile, fontSize = 12.sp)
+                    Icon(Icons.Default.Share, contentDescription = strings.exportFile, tint = NeonCyan, modifier = Modifier.size(20.dp))
                 }
 
                 // Clear Button
@@ -129,9 +135,10 @@ fun LogsScreen() {
                     modifier = Modifier.size(36.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Delete,
+                        Icons.Default.Delete,
                         contentDescription = strings.clearLogs,
-                        tint = MaterialTheme.colorScheme.error
+                        tint = CyberRed.copy(alpha = 0.8f),
+                        modifier = Modifier.size(20.dp)
                     )
                 }
             }
@@ -139,56 +146,59 @@ fun LogsScreen() {
 
         Spacer(Modifier.height(12.dp))
 
-        // Search Bar and Filter Chips
+        // Search Bar and Autoscroll
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             NullVpTextField(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
                 placeholder = { Text(strings.searchLogs, fontSize = 13.sp) },
                 modifier = Modifier.weight(1f),
-                singleLine = true
+                singleLine = true,
+                showPasteButton = false,
+                showClearButton = true
             )
 
             // Autoscroll toggle
             FilterChip(
                 selected = autoscroll,
                 onClick = { autoscroll = !autoscroll },
-                label = { Text(strings.autoscroll, fontSize = 12.sp) },
+                label = { Text(strings.autoscroll, fontSize = 12.sp, maxLines = 1) },
                 colors = FilterChipDefaults.filterChipColors(
-                    selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f),
-                    selectedLabelColor = MaterialTheme.colorScheme.primary
+                    selectedContainerColor = NeonCyan.copy(alpha = 0.2f),
+                    selectedLabelColor = NeonCyan
                 )
             )
         }
 
         Spacer(Modifier.height(8.dp))
 
-        // Level Filter Chips
+        // Level Filter Chips with horizontal scroll (prevents ERR\nOR word wrapping!)
         Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
             FilterChip(
                 selected = selectedLevel == null,
                 onClick = { selectedLevel = null },
-                label = { Text(strings.filterLevelAll, fontSize = 11.sp) }
+                label = { Text(strings.filterLevelAll, fontSize = 11.sp, maxLines = 1) }
             )
             LogLevel.values().forEach { level ->
                 val selected = selectedLevel == level
                 val chipColor = when (level) {
-                    LogLevel.INFO -> Color(0xFF00E5FF)
-                    LogLevel.WARN -> Color(0xFFFFD600)
-                    LogLevel.ERROR -> Color(0xFFFF5252)
+                    LogLevel.INFO -> NeonCyan
+                    LogLevel.WARN -> CyberAmber
+                    LogLevel.ERROR -> CyberRed
                     LogLevel.DEBUG -> Color(0xFF90A4AE)
                 }
                 FilterChip(
                     selected = selected,
                     onClick = { selectedLevel = if (selected) null else level },
-                    label = { Text(level.name, fontSize = 11.sp) },
+                    label = { Text(level.name, fontSize = 11.sp, maxLines = 1) },
                     colors = FilterChipDefaults.filterChipColors(
                         selectedContainerColor = chipColor.copy(alpha = 0.2f),
                         selectedLabelColor = chipColor
@@ -227,7 +237,7 @@ fun LogsScreen() {
                         LazyColumn(
                             state = listState,
                             modifier = Modifier.fillMaxSize(),
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             itemsIndexed(filteredLogs, key = { index, log -> "${log.id}_$index" }) { _, log ->
                                 LogItemRow(log)
@@ -266,9 +276,9 @@ fun LogsScreen() {
 @Composable
 private fun LogItemRow(log: nullvp.data.store.LogEntry) {
     val levelColor = when (log.level) {
-        LogLevel.INFO -> Color(0xFF00E5FF)
-        LogLevel.WARN -> Color(0xFFFFD600)
-        LogLevel.ERROR -> Color(0xFFFF5252)
+        LogLevel.INFO -> NeonCyan
+        LogLevel.WARN -> CyberAmber
+        LogLevel.ERROR -> CyberRed
         LogLevel.DEBUG -> Color(0xFF78909C)
     }
 
@@ -279,46 +289,27 @@ private fun LogItemRow(log: nullvp.data.store.LogEntry) {
     val millis = log.timestamp % 1000
     val timeStr = "${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}.${millis.toString().padStart(3, '0')}"
 
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.Top
-    ) {
-        // Timestamp
-        Text(
-            text = timeStr,
-            fontFamily = FontFamily.Monospace,
-            fontSize = 11.sp,
-            color = Color(0xFF546E7A),
-            modifier = Modifier.padding(end = 8.dp)
-        )
-
-        // Level Badge
-        Text(
-            text = log.level.name.padEnd(5),
-            fontFamily = FontFamily.Monospace,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Bold,
-            color = levelColor,
-            modifier = Modifier.padding(end = 8.dp)
-        )
-
-        // Tag
-        Text(
-            text = "[${log.tag}]",
-            fontFamily = FontFamily.Monospace,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = Color(0xFFB0BEC5),
-            modifier = Modifier.padding(end = 8.dp)
-        )
-
-        // Message
-        Text(
-            text = log.message,
-            fontFamily = FontFamily.Monospace,
-            fontSize = 11.sp,
-            color = Color(0xFFECEFF1)
-        )
+    val annotated = remember(log) {
+        buildAnnotatedString {
+            withStyle(SpanStyle(color = Color(0xFF546E7A), fontFamily = FontFamily.Monospace, fontSize = 11.sp)) {
+                append("$timeStr ")
+            }
+            withStyle(SpanStyle(color = levelColor, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, fontSize = 11.sp)) {
+                append("${log.level.name.padEnd(5)} ")
+            }
+            withStyle(SpanStyle(color = Color(0xFF80CBC4), fontWeight = FontWeight.SemiBold, fontFamily = FontFamily.Monospace, fontSize = 11.sp)) {
+                append("[${log.tag}] ")
+            }
+            withStyle(SpanStyle(color = Color(0xFFECEFF1), fontFamily = FontFamily.Monospace, fontSize = 11.sp)) {
+                append(log.message)
+            }
+        }
     }
+
+    Text(
+        text = annotated,
+        modifier = Modifier.fillMaxWidth(),
+        lineHeight = 16.sp
+    )
 }
 

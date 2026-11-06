@@ -36,7 +36,11 @@ import nullvp.domain.model.OperationMode
 import nullvp.domain.model.Profile
 import nullvp.domain.protocol.ProtocolRegistry
 import nullvp.i18n.Localization
+import nullvp.platform.AppBackHandler
+import nullvp.platform.AppExitHelper
 import nullvp.platform.ClipboardHelper
+import nullvp.platform.ConnectionInfo
+import nullvp.platform.ConnectionInfoHelper
 import nullvp.platform.PingHelper
 import nullvp.platform.PrivilegeHelper
 import nullvp.platform.UrlHelper
@@ -104,6 +108,17 @@ fun App() {
     var currentScreen by remember { mutableStateOf(Screen.DASHBOARD) }
     var profileToEdit by remember { mutableStateOf<Profile?>(null) }
 
+    // Exit confirmation dialog
+    var showExitDialog by remember { mutableStateOf(false) }
+
+    // Android BackHandler — из любого экрана → главный, из главного → диалог выхода
+    AppBackHandler(enabled = currentScreen != Screen.DASHBOARD) {
+        currentScreen = Screen.DASHBOARD
+    }
+    AppBackHandler(enabled = currentScreen == Screen.DASHBOARD) {
+        showExitDialog = true
+    }
+
     // Sudo & connection flow states
     var showSudoDialog by remember { mutableStateOf(false) }
     var pendingConnectOnSudo by remember { mutableStateOf(false) }
@@ -111,6 +126,7 @@ fun App() {
     // Ping states
     var isPingingActive by remember { mutableStateOf(false) }
     var isBatchPinging by remember { mutableStateOf(false) }
+    var connectionInfoResult by remember { mutableStateOf<nullvp.platform.ConnectionInfo?>(null) }
 
     // Subscriptions import state
     var newSubUrl by remember { mutableStateOf("") }
@@ -131,7 +147,7 @@ fun App() {
     }
 
     NullVpTheme {
-        BoxWithConstraints(modifier = Modifier.fillMaxSize().background(DarkBackground)) {
+        BoxWithConstraints(modifier = Modifier.fillMaxSize().background(DarkBackground).safeDrawingPadding()) {
             val isWideScreen = maxWidth >= 680.dp
 
             Row(modifier = Modifier.fillMaxSize()) {
@@ -333,60 +349,6 @@ fun App() {
                                         }
                                     )
 
-                                    // Operation Mode Switcher Pills
-                                    Card(
-                                        shape = RoundedCornerShape(14.dp),
-                                        colors = CardDefaults.cardColors(containerColor = DarkSurface),
-                                        border = BorderStroke(1.dp, DarkSurfaceVariant)
-                                    ) {
-                                        Column(
-                                            modifier = Modifier.padding(12.dp),
-                                            horizontalAlignment = Alignment.CenterHorizontally
-                                        ) {
-                                            Text(
-                                                text = strings.modeTitle,
-                                                style = MaterialTheme.typography.labelMedium,
-                                                color = OnDarkSurfaceVariant,
-                                                fontWeight = FontWeight.SemiBold
-                                            )
-                                            Spacer(Modifier.height(8.dp))
-                                            Row(
-                                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                val modeItems = listOf(
-                                                    OperationMode.TUN to "TUN",
-                                                    OperationMode.SYSTEM_PROXY to "Системный прокси",
-                                                    OperationMode.PROXY_ONLY to "Только прокси"
-                                                )
-                                                modeItems.forEach { (mode, label) ->
-                                                    val selected = settings.operationMode == mode
-                                                    FilterChip(
-                                                        selected = selected,
-                                                        onClick = {
-                                                            if (mode == OperationMode.TUN && PrivilegeHelper.needsSudoForTun) {
-                                                                pendingConnectOnSudo = false
-                                                                showSudoDialog = true
-                                                            } else {
-                                                                AppStateStore.setOperationMode(mode)
-                                                            }
-                                                        },
-                                                        label = { Text(label, fontSize = 12.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal) },
-                                                        colors = FilterChipDefaults.filterChipColors(
-                                                            selectedContainerColor = NeonCyan.copy(alpha = 0.25f),
-                                                            selectedLabelColor = NeonCyan
-                                                        ),
-                                                        border = FilterChipDefaults.filterChipBorder(
-                                                            enabled = true,
-                                                            selected = selected,
-                                                            borderColor = if (selected) NeonCyan else Color.Transparent
-                                                        )
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
-
                                     // Realtime Speed Stats
                                     SpeedRow(
                                         rxSpeedBps = stats.rxSpeedBps,
@@ -434,9 +396,18 @@ fun App() {
                                                         onClick = {
                                                             if (!isPingingActive) {
                                                                 isPingingActive = true
+                                                                connectionInfoResult = null
                                                                 scope.launch {
                                                                     val ping = PingHelper.measurePing(activeProfile.serverAddress, activeProfile.serverPort)
-                                                                    AppStateStore.updateProfile(activeProfile.copy(pingMs = ping))
+                                                                    val info = ConnectionInfoHelper.fetchServerInfo(activeProfile.serverAddress, if (ping >= 0) ping else 0L)
+                                                                    val updated = activeProfile.copy(
+                                                                        pingMs = ping,
+                                                                        serverIp = info?.maskedIp,
+                                                                        serverLocation = info?.let { "${it.country}${if (it.city.isNotBlank()) ", ${it.city}" else ""}" },
+                                                                        serverFlag = info?.flag
+                                                                    )
+                                                                    AppStateStore.updateProfile(updated)
+                                                                    connectionInfoResult = info
                                                                     isPingingActive = false
                                                                 }
                                                             }
@@ -455,6 +426,70 @@ fun App() {
                                                             Text("⚡", fontSize = 13.sp)
                                                             Spacer(Modifier.width(4.dp))
                                                             Text(if (activeProfile.pingMs >= 0) "${activeProfile.pingMs} ms" else "Пинг", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                                        }
+                                                    }
+                                                }
+                                            }
+
+                                            // Результат пинга: IP + локация + задержка
+                                            val displayInfo = connectionInfoResult ?: if (!activeProfile.serverLocation.isNullOrBlank()) {
+                                                ConnectionInfo(
+                                                    ip = activeProfile.serverIp ?: activeProfile.serverAddress,
+                                                    maskedIp = activeProfile.serverIp ?: ConnectionInfoHelper.maskIp(activeProfile.serverAddress),
+                                                    country = activeProfile.serverLocation ?: "",
+                                                    countryCode = "",
+                                                    city = "",
+                                                    latencyMs = activeProfile.pingMs,
+                                                    flag = activeProfile.serverFlag ?: "🌍"
+                                                )
+                                            } else null
+
+                                            displayInfo?.let { info ->
+                                                Surface(
+                                                    shape = RoundedCornerShape(10.dp),
+                                                    color = NeonCyan.copy(alpha = 0.08f),
+                                                    border = BorderStroke(1.dp, NeonCyan.copy(alpha = 0.25f)),
+                                                    modifier = Modifier.fillMaxWidth()
+                                                ) {
+                                                    Row(
+                                                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                                    ) {
+                                                        Text(info.flag, fontSize = 20.sp)
+                                                        Column(modifier = Modifier.weight(1f)) {
+                                                            Text(
+                                                                text = "${info.country}${if (info.city.isNotBlank()) ", ${info.city}" else ""}",
+                                                                fontSize = 13.sp,
+                                                                fontWeight = FontWeight.SemiBold,
+                                                                color = OnDarkSurface
+                                                            )
+                                                            Text(
+                                                                text = info.maskedIp,
+                                                                fontSize = 12.sp,
+                                                                color = NeonCyan,
+                                                                fontWeight = FontWeight.Medium
+                                                            )
+                                                        }
+                                                        Surface(
+                                                            shape = RoundedCornerShape(6.dp),
+                                                            color = when {
+                                                                info.latencyMs < 100 -> NeonCyan.copy(alpha = 0.2f)
+                                                                info.latencyMs < 300 -> Color(0xFFFFD740).copy(alpha = 0.2f)
+                                                                else -> CyberRed.copy(alpha = 0.2f)
+                                                            }
+                                                        ) {
+                                                            Text(
+                                                                text = "${info.latencyMs} ms",
+                                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                                                fontSize = 12.sp,
+                                                                fontWeight = FontWeight.Bold,
+                                                                color = when {
+                                                                    info.latencyMs < 100 -> NeonCyan
+                                                                    info.latencyMs < 300 -> Color(0xFFFFD740)
+                                                                    else -> CyberRed
+                                                                }
+                                                            )
                                                         }
                                                     }
                                                 }
@@ -495,11 +530,17 @@ fun App() {
                                     ) {
                                         Text(
                                             text = "${strings.serversTitle} (${profiles.size})",
-                                            style = MaterialTheme.typography.titleLarge,
+                                            style = if (isWideScreen) MaterialTheme.typography.titleLarge else MaterialTheme.typography.titleMedium,
                                             fontWeight = FontWeight.Bold,
-                                            color = OnDarkSurface
+                                            color = OnDarkSurface,
+                                            modifier = Modifier.weight(1f, fill = false),
+                                            maxLines = 1,
+                                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                                         )
-                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Row(
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
                                             // Batch Ping Button
                                             OutlinedButton(
                                                 onClick = {
@@ -509,7 +550,14 @@ fun App() {
                                                             profiles.forEach { p ->
                                                                 launch {
                                                                     val ping = PingHelper.measurePing(p.serverAddress, p.serverPort)
-                                                                    AppStateStore.updateProfile(p.copy(pingMs = ping))
+                                                                    val info = ConnectionInfoHelper.fetchServerInfo(p.serverAddress, if (ping >= 0) ping else 0L)
+                                                                    val updated = p.copy(
+                                                                        pingMs = ping,
+                                                                        serverIp = info?.maskedIp,
+                                                                        serverLocation = info?.let { "${it.country}${if (it.city.isNotBlank()) ", ${it.city}" else ""}" },
+                                                                        serverFlag = info?.flag
+                                                                    )
+                                                                    AppStateStore.updateProfile(updated)
                                                                 }
                                                             }
                                                             isBatchPinging = false
@@ -519,7 +567,7 @@ fun App() {
                                                 enabled = !isBatchPinging,
                                                 colors = ButtonDefaults.outlinedButtonColors(contentColor = NeonCyan),
                                                 border = BorderStroke(1.dp, NeonCyan.copy(alpha = 0.6f)),
-                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                                contentPadding = PaddingValues(horizontal = if (isWideScreen) 10.dp else 8.dp, vertical = 6.dp),
                                                 shape = RoundedCornerShape(8.dp)
                                             ) {
                                                 if (isBatchPinging) {
@@ -527,8 +575,10 @@ fun App() {
                                                 } else {
                                                     Text("⚡", fontSize = 13.sp)
                                                 }
-                                                Spacer(Modifier.width(4.dp))
-                                                Text("Пинг", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                                if (isWideScreen) {
+                                                    Spacer(Modifier.width(4.dp))
+                                                    Text("Пинг", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                                }
                                             }
 
                                             OutlinedButton(
@@ -572,73 +622,181 @@ fun App() {
                                                 },
                                                 colors = ButtonDefaults.outlinedButtonColors(contentColor = NeonCyan),
                                                 border = BorderStroke(1.dp, NeonCyan.copy(alpha = 0.6f)),
-                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                                contentPadding = PaddingValues(horizontal = if (isWideScreen) 10.dp else 8.dp, vertical = 6.dp),
                                                 shape = RoundedCornerShape(8.dp)
                                             ) {
-                                                Icon(PasteIcon, contentDescription = null, modifier = Modifier.size(16.dp))
-                                                Spacer(Modifier.width(4.dp))
-                                                Text(if (settings.language.code == "ru") "Из буфера" else "From Clipboard", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                                Icon(PasteIcon, contentDescription = "Из буфера", modifier = Modifier.size(16.dp))
+                                                if (isWideScreen) {
+                                                    Spacer(Modifier.width(4.dp))
+                                                    Text(if (settings.language.code == "ru") "Из буфера" else "From Clipboard", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                                }
                                             }
 
                                             Button(
                                                 onClick = { currentScreen = Screen.SUBSCRIPTIONS },
                                                 colors = ButtonDefaults.buttonColors(containerColor = NeonCyan, contentColor = Color.Black),
-                                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                                contentPadding = PaddingValues(horizontal = if (isWideScreen) 12.dp else 10.dp, vertical = 6.dp),
                                                 shape = RoundedCornerShape(8.dp)
                                             ) {
-                                                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                                                Spacer(Modifier.width(4.dp))
-                                                Text(strings.addServer, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                                Icon(Icons.Default.Add, contentDescription = strings.addServer, modifier = Modifier.size(16.dp))
+                                                if (isWideScreen) {
+                                                    Spacer(Modifier.width(4.dp))
+                                                    Text(strings.addServer, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                                }
                                             }
                                         }
                                     }
 
                                     Spacer(modifier = Modifier.height(14.dp))
 
+                                    // Group servers by Subscription
+                                    val subGroups = remember(profiles, subscriptions) {
+                                        val result = mutableListOf<Pair<nullvp.domain.model.Subscription?, List<Profile>>>()
+                                        val knownSubIds = subscriptions.map { it.id }.toSet()
+
+                                        // 1. Subscriptions with servers
+                                        subscriptions.forEach { sub ->
+                                            val group = profiles.filter { it.subscriptionId == sub.id }
+                                            if (group.isNotEmpty()) {
+                                                result.add(sub to group)
+                                            }
+                                        }
+
+                                        // 2. Standalone/manual servers without a known subscription
+                                        val manual = profiles.filter { it.subscriptionId == null || !knownSubIds.contains(it.subscriptionId) }
+                                        if (manual.isNotEmpty()) {
+                                            result.add(null to manual)
+                                        }
+
+                                        result
+                                    }
+
+                                    var expandedSubIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+
+                                    val hasSubscriptions = subGroups.any { it.first != null }
+
+                                    LaunchedEffect(subGroups.size, selectedProfileId) {
+                                        if (expandedSubIds.isEmpty()) {
+                                            val initial = mutableSetOf<String>()
+                                            subGroups.forEach { (sub, groupProfiles) ->
+                                                val key = sub?.id ?: "manual"
+                                                if (groupProfiles.any { it.id == selectedProfileId } || subGroups.size == 1) {
+                                                    initial.add(key)
+                                                }
+                                            }
+                                            expandedSubIds = initial
+                                        }
+                                    }
+
                                     LazyColumn(
                                         verticalArrangement = Arrangement.spacedBy(10.dp),
                                         modifier = Modifier.fillMaxSize()
                                     ) {
-                                        itemsIndexed(profiles, key = { index, profile -> "${profile.id}_$index" }) { _, profile ->
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Box(modifier = Modifier.weight(1f)) {
-                                                    ServerCard(
-                                                        profile = profile,
-                                                        isSelected = profile.id == selectedProfileId,
-                                                        onSelect = {
-                                                            val prevId = selectedProfileId
-                                                            AppStateStore.selectProfile(profile.id)
-                                                            if (isRunning && prevId != profile.id) {
-                                                                scope.launch {
-                                                                    coreEngine.start(profile)
+                                        if (!hasSubscriptions) {
+                                            // Single manual group without subscriptions: list directly
+                                            itemsIndexed(profiles, key = { index, profile -> "${profile.id}_$index" }) { _, profile ->
+                                                ServerCard(
+                                                    profile = profile,
+                                                    isSelected = profile.id == selectedProfileId,
+                                                    onSelect = {
+                                                        val prevId = selectedProfileId
+                                                        AppStateStore.selectProfile(profile.id)
+                                                        if (isRunning && prevId != profile.id) {
+                                                            scope.launch {
+                                                                coreEngine.start(profile)
+                                                            }
+                                                        }
+                                                        currentScreen = Screen.DASHBOARD
+                                                    },
+                                                    onEdit = { profileToEdit = profile },
+                                                    onDuplicate = { AppStateStore.duplicateProfile(profile) },
+                                                    onDelete = { AppStateStore.deleteProfile(profile.id) }
+                                                )
+                                            }
+                                        } else {
+                                            // Multiple subscriptions / Subscriptions + Manual: collapsible groups
+                                            subGroups.forEach { (sub, groupProfiles) ->
+                                                val groupId = sub?.id ?: "manual"
+                                                val isExpanded = expandedSubIds.contains(groupId)
+                                                val groupTitle = sub?.name ?: if (settings.language.code == "ru") "Без подписки / Ручные" else "Manual / Custom"
+
+                                                item(key = "header_$groupId") {
+                                                    Surface(
+                                                        shape = RoundedCornerShape(10.dp),
+                                                        color = DarkSurfaceVariant.copy(alpha = 0.5f),
+                                                        border = BorderStroke(1.dp, NeonCyan.copy(alpha = if (isExpanded) 0.35f else 0.12f)),
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .clickable {
+                                                                expandedSubIds = if (isExpanded) expandedSubIds - groupId else expandedSubIds + groupId
+                                                            }
+                                                    ) {
+                                                        Row(
+                                                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                                                            verticalAlignment = Alignment.CenterVertically,
+                                                            horizontalArrangement = Arrangement.SpaceBetween
+                                                        ) {
+                                                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                                                Icon(
+                                                                    imageVector = if (isExpanded) Icons.Default.ArrowDropDown else Icons.AutoMirrored.Filled.List,
+                                                                    contentDescription = null,
+                                                                    tint = NeonCyan,
+                                                                    modifier = Modifier.size(20.dp)
+                                                                )
+                                                                Spacer(Modifier.width(8.dp))
+                                                                Text(
+                                                                    text = groupTitle,
+                                                                    fontWeight = FontWeight.Bold,
+                                                                    fontSize = 14.sp,
+                                                                    color = OnDarkSurface,
+                                                                    maxLines = 1,
+                                                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                                                )
+                                                                Spacer(Modifier.width(8.dp))
+                                                                Surface(
+                                                                    shape = RoundedCornerShape(6.dp),
+                                                                    color = NeonCyan.copy(alpha = 0.15f)
+                                                                ) {
+                                                                    Text(
+                                                                        text = "${groupProfiles.size}",
+                                                                        fontSize = 11.sp,
+                                                                        fontWeight = FontWeight.Bold,
+                                                                        color = NeonCyan,
+                                                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                                    )
                                                                 }
                                                             }
-                                                            currentScreen = Screen.DASHBOARD
+
+                                                            Text(
+                                                                text = if (isExpanded) "Скрыть" else "Показать",
+                                                                fontSize = 11.sp,
+                                                                color = NeonCyan.copy(alpha = 0.8f),
+                                                                fontWeight = FontWeight.Medium
+                                                            )
                                                         }
-                                                    )
+                                                    }
                                                 }
-                                                IconButton(
-                                                    onClick = { profileToEdit = profile },
-                                                    modifier = Modifier.padding(start = 2.dp)
-                                                ) {
-                                                    Icon(
-                                                        Icons.Default.Edit,
-                                                        contentDescription = strings.editServer,
-                                                        tint = OnDarkSurfaceVariant
-                                                    )
-                                                }
-                                                IconButton(
-                                                    onClick = { AppStateStore.deleteProfile(profile.id) },
-                                                    modifier = Modifier.padding(start = 2.dp)
-                                                ) {
-                                                    Icon(
-                                                        Icons.Default.Delete,
-                                                        contentDescription = "Удалить сервер",
-                                                        tint = CyberRed.copy(alpha = 0.8f)
-                                                    )
+
+                                                if (isExpanded) {
+                                                    itemsIndexed(groupProfiles, key = { index, profile -> "${profile.id}_$index" }) { _, profile ->
+                                                        ServerCard(
+                                                            profile = profile,
+                                                            isSelected = profile.id == selectedProfileId,
+                                                            onSelect = {
+                                                                val prevId = selectedProfileId
+                                                                AppStateStore.selectProfile(profile.id)
+                                                                if (isRunning && prevId != profile.id) {
+                                                                    scope.launch {
+                                                                        coreEngine.start(profile)
+                                                                    }
+                                                                }
+                                                                currentScreen = Screen.DASHBOARD
+                                                            },
+                                                            onEdit = { profileToEdit = profile },
+                                                            onDuplicate = { AppStateStore.duplicateProfile(profile) },
+                                                            onDelete = { AppStateStore.deleteProfile(profile.id) }
+                                                        )
+                                                    }
                                                 }
                                             }
                                         }
@@ -839,6 +997,53 @@ fun App() {
                 },
                 onDelete = { id -> AppStateStore.deleteProfile(id) },
                 onDuplicate = { p -> AppStateStore.duplicateProfile(p) }
+            )
+        }
+
+        // Exit Confirmation Dialog (Android back button on Dashboard)
+        if (showExitDialog) {
+            AlertDialog(
+                onDismissRequest = { showExitDialog = false },
+                title = {
+                    Text(
+                        text = if (settings.language.code == "ru") "Выйти из приложения?" else "Exit application?",
+                        fontWeight = FontWeight.Bold
+                    )
+                },
+                text = {
+                    Text(
+                        text = if (settings.language.code == "ru")
+                            if (isRunning) "VPN туннель будет остановлен." else "Вы уверены, что хотите выйти?"
+                        else
+                            if (isRunning) "VPN tunnel will be stopped." else "Are you sure you want to exit?",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            showExitDialog = false
+                            if (isRunning) coreEngine.stop()
+                            AppExitHelper.exitApp()
+                        }
+                    ) {
+                        Text(
+                            text = if (settings.language.code == "ru") "Выйти" else "Exit",
+                            color = CyberRed,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showExitDialog = false }) {
+                        Text(
+                            text = if (settings.language.code == "ru") "Отмена" else "Cancel",
+                            color = NeonCyan
+                        )
+                    }
+                },
+                containerColor = MaterialTheme.colorScheme.surface,
+                shape = RoundedCornerShape(16.dp)
             )
         }
     }

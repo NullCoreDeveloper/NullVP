@@ -1,6 +1,6 @@
 package nullvp.presentation.components
 
-import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -117,40 +117,49 @@ fun NullVpTextField(
         keyboardOptions = keyboardOptions,
         keyboardActions = keyboardActions,
         colors = colors,
-        trailingIcon = trailingIcon ?: {
-            Row {
-                if (showClearButton && value.isNotEmpty()) {
-                    IconButton(
-                        onClick = {
-                            tfv = TextFieldValue("", TextRange.Zero)
-                            onValueChange("")
+        trailingIcon = trailingIcon ?: if (showClearButton || showPasteButton) {
+            {
+                Row(
+                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                    modifier = Modifier.padding(end = 4.dp)
+                ) {
+                    if (showClearButton && value.isNotEmpty()) {
+                        IconButton(
+                            onClick = {
+                                tfv = TextFieldValue("", TextRange.Zero)
+                                onValueChange("")
+                            },
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Clear,
+                                contentDescription = "Очистить",
+                                modifier = Modifier.size(16.dp),
+                                tint = OnDarkSurfaceVariant
+                            )
                         }
-                    ) {
-                        Icon(
-                            Icons.Default.Clear,
-                            contentDescription = "Очистить",
-                            tint = OnDarkSurfaceVariant
-                        )
                     }
-                }
-                if (showPasteButton) {
-                    IconButton(
-                        onClick = {
-                            val clip = ClipboardHelper.getText()
-                            if (!clip.isNullOrEmpty()) {
-                                tfv = TextFieldValue(clip, TextRange(clip.length))
-                                onValueChange(clip)
-                            }
+                    if (showPasteButton) {
+                        IconButton(
+                            onClick = {
+                                val clip = ClipboardHelper.getText()
+                                if (!clip.isNullOrEmpty()) {
+                                    tfv = TextFieldValue(clip, TextRange(clip.length))
+                                    onValueChange(clip)
+                                }
+                            },
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(
+                                PasteIcon,
+                                contentDescription = "Вставить из буфера",
+                                modifier = Modifier.size(16.dp),
+                                tint = if (value.isEmpty()) NeonCyan else OnDarkSurfaceVariant
+                            )
                         }
-                    ) {
-                        Icon(
-                            PasteIcon,
-                            contentDescription = "Вставить из буфера",
-                            tint = if (value.isEmpty()) NeonCyan else OnDarkSurfaceVariant
-                        )
                     }
                 }
             }
-        }
+        } else null
     )
 }

@@ -81,8 +81,15 @@ object AppStateStore {
                 _profiles.value = cleanedProfiles
                 _subscriptions.value = loaded.subscriptions
                 _selectedProfileId.value = if (cleanedProfiles.any { it.id == loaded.selectedProfileId }) loaded.selectedProfileId else cleanedProfiles.firstOrNull()?.id
-                _settings.value = loaded.settings
-                if (cleanedProfiles.size != loaded.profiles.size) {
+                val legacyRuleIds = setOf("rule-ads", "rule-lan", "rule-ru-gov-banks")
+                val cleanedRules = loaded.settings.customRules.filterNot { it.id in legacyRuleIds }
+                val cleanedSettings = if (cleanedRules.size != loaded.settings.customRules.size) {
+                    loaded.settings.copy(customRules = cleanedRules)
+                } else {
+                    loaded.settings
+                }
+                _settings.value = cleanedSettings
+                if (cleanedProfiles.size != loaded.profiles.size || cleanedRules.size != loaded.settings.customRules.size) {
                     saveState()
                 }
             }

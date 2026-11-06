@@ -22,14 +22,17 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.style.TextOverflow
 import nullvp.data.store.AppStateStore
 import nullvp.domain.model.AppSettings
 import nullvp.domain.model.CustomRoutingRule
 import nullvp.domain.model.OperationMode
-import nullvp.domain.model.RoutingStrategy
+
 import nullvp.i18n.AppLanguage
 import nullvp.i18n.AppStrings
 import nullvp.i18n.Localization
+import nullvp.platform.AppListHelper
+import nullvp.presentation.dialogs.AppSelectorDialog
 import nullvp.presentation.dialogs.EditRuleDialog
 
 @Composable
@@ -40,6 +43,7 @@ fun SettingsScreen() {
     var activeTab by remember { mutableStateOf(0) }
     var editingRule by remember { mutableStateOf<CustomRoutingRule?>(null) }
     var isCreatingRule by remember { mutableStateOf(false) }
+    var showAppSelector by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -125,7 +129,11 @@ fun SettingsScreen() {
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 when (activeTab) {
-                    0 -> NetworkCategorySection(settings, strings)
+                    0 -> NetworkCategorySection(
+                        settings = settings,
+                        strings = strings,
+                        onOpenAppSelector = { showAppSelector = true }
+                    )
                     1 -> RoutingCategorySection(
                         settings = settings,
                         strings = strings,
@@ -138,6 +146,18 @@ fun SettingsScreen() {
                 }
             }
         }
+    }
+
+    // App Selector Dialog for Split Tunneling
+    if (showAppSelector) {
+        AppSelectorDialog(
+            initialSelected = settings.perAppSelectedPackages,
+            onDismiss = { showAppSelector = false },
+            onSave = { selected ->
+                showAppSelector = false
+                AppStateStore.updateSettings(settings.copy(perAppSelectedPackages = selected))
+            }
+        )
     }
 
     // Rule Edit/Create Dialog
@@ -165,7 +185,13 @@ fun SettingsScreen() {
 
 // ======================= 1. NETWORK & MODES CATEGORY =======================
 @Composable
-private fun NetworkCategorySection(settings: AppSettings, strings: AppStrings) {
+private fun NetworkCategorySection(
+    settings: AppSettings,
+    strings: AppStrings,
+    onOpenAppSelector: () -> Unit
+) {
+    val isAndroid = AppListHelper.isAndroid()
+
     Card(
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -179,12 +205,27 @@ private fun NetworkCategorySection(settings: AppSettings, strings: AppStrings) {
                 color = MaterialTheme.colorScheme.primary
             )
 
-            // Operation Mode Selector
-            val modes = listOf(
-                Triple(OperationMode.TUN, strings.modeTun, strings.modeTunDesc),
-                Triple(OperationMode.SYSTEM_PROXY, strings.modeSystemProxy, strings.modeSystemProxyDesc),
-                Triple(OperationMode.PROXY_ONLY, strings.modeProxyOnly, strings.modeProxyOnlyDesc)
-            )
+            // Operation Mode Selector: 2 clean modes on Android, 3 on Desktop
+            val modes = if (isAndroid) {
+                listOf(
+                    Triple(
+                        OperationMode.TUN,
+                        if (settings.language == AppLanguage.RU) "VPN (Режим VPN-туннеля)" else "VPN Tunnel Mode",
+                        if (settings.language == AppLanguage.RU) "Туннелирование всего интернет-трафика системы через Android VPN" else "Route entire device traffic through Android VpnService"
+                    ),
+                    Triple(
+                        OperationMode.PROXY_ONLY,
+                        if (settings.language == AppLanguage.RU) "Прокси (Только локальный прокси)" else "Proxy Only (Local Port)",
+                        if (settings.language == AppLanguage.RU) "Поднятие локального SOCKS5/HTTP порта без создания VPN (для ручной настройки в Telegram/Wi-Fi)" else "Runs local SOCKS5/HTTP inbound for manual app setup"
+                    )
+                )
+            } else {
+                listOf(
+                    Triple(OperationMode.TUN, strings.modeTun, strings.modeTunDesc),
+                    Triple(OperationMode.SYSTEM_PROXY, strings.modeSystemProxy, strings.modeSystemProxyDesc),
+                    Triple(OperationMode.PROXY_ONLY, strings.modeProxyOnly, strings.modeProxyOnlyDesc)
+                )
+            }
 
             modes.forEach { (mode, title, desc) ->
                 val selected = settings.operationMode == mode
@@ -213,6 +254,117 @@ private fun NetworkCategorySection(settings: AppSettings, strings: AppStrings) {
                             Text(text = title, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
                             Text(text = desc, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
+                    }
+                }
+            }
+
+            // Android Per-App Split Tunneling (Visible in VPN Mode on Android)
+            if (isAndroid && settings.operationMode == OperationMode.TUN) {
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+
+                Text(
+                    text = if (settings.language == AppLanguage.RU) "Раздельное туннелирование (Split Tunneling)" else "Per-App Split Tunneling",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+
+                SettingsToggleRow(
+                    title = if (settings.language == AppLanguage.RU) "Включить раздельное туннелирование" else "Enable Split Tunneling",
+                    subtitle = if (settings.language == AppLanguage.RU) "Индивидуальный выбор приложений, работающих через VPN или в обход него" else "Select which apps route through VPN or bypass it",
+                    checked = settings.perAppProxyEnabled,
+                    onCheckedChange = { AppStateStore.updateSettings(settings.copy(perAppProxyEnabled = it)) }
+                )
+
+                AnimatedVisibility(visible = settings.perAppProxyEnabled) {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(top = 4.dp)) {
+                        val bypassOptions = listOf(
+                            true to if (settings.language == AppLanguage.RU) "В обход выбранных (Исключения)" else "Bypass selected (Blacklist)",
+                            false to if (settings.language == AppLanguage.RU) "Только выбранные (Белый список)" else "Only selected (Whitelist)"
+                        )
+
+                        bypassOptions.forEach { (isBypass, optTitle) ->
+                            val isSelected = settings.perAppBypassMode == isBypass
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
+                                border = androidx.compose.foundation.BorderStroke(
+                                    width = if (isSelected) 1.5.dp else 1.dp,
+                                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)
+                                ),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { AppStateStore.updateSettings(settings.copy(perAppBypassMode = isBypass)) }
+                            ) {
+                                Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    RadioButton(
+                                        selected = isSelected,
+                                        onClick = { AppStateStore.updateSettings(settings.copy(perAppBypassMode = isBypass)) },
+                                        colors = RadioButtonDefaults.colors(selectedColor = MaterialTheme.colorScheme.primary)
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Column {
+                                        Text(optTitle, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                                        Text(
+                                            text = if (isBypass) {
+                                                if (settings.language == AppLanguage.RU) "Выбранные приложения не попадают в VPN туннель и работают напрямую" else "Selected apps bypass VPN directly"
+                                            } else {
+                                                if (settings.language == AppLanguage.RU) "Только выбранные приложения идут через VPN туннель, все остальные напрямую" else "Only selected apps route through VPN"
+                                            },
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // App selector button
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onOpenAppSelector() }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column {
+                                    Text(
+                                        text = if (settings.language == AppLanguage.RU) "Выбрать приложения" else "Select Applications",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.sp,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = if (settings.language == AppLanguage.RU) {
+                                            "Выбрано: ${settings.perAppSelectedPackages.size} прилож."
+                                        } else {
+                                            "Selected: ${settings.perAppSelectedPackages.size} apps"
+                                        },
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                                Icon(Icons.Default.Edit, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                            }
+                        }
+
+                        // Dynamic RU scanner toggle
+                        SettingsToggleRow(
+                            title = strings.dynamicRuAppScanner,
+                            subtitle = if (settings.language == AppLanguage.RU) {
+                                "Автоматически направлять сервисы РФ напрямую (ручной выбор приложений имеет высший приоритет над динамическим)"
+                            } else {
+                                "Directly route RU services (manual app list takes priority)"
+                            },
+                            checked = settings.dynamicRuAppScannerEnabled,
+                            onCheckedChange = { AppStateStore.updateSettings(settings.copy(dynamicRuAppScannerEnabled = it)) }
+                        )
                     }
                 }
             }
@@ -316,181 +468,190 @@ private fun RoutingCategorySection(
     onAddRule: () -> Unit,
     onEditRule: (CustomRoutingRule) -> Unit
 ) {
-    Card(
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
-    ) {
-        Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Text(
-                text = strings.routingMode,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary
-            )
-
-            // Routing Strategy presets
-            val strategies = listOf(
-                Triple(RoutingStrategy.BYPASS_LAN_AND_RU, strings.presetBypassRuLan, strings.presetBypassRuLanDesc),
-                Triple(RoutingStrategy.GLOBAL, strings.presetGlobal, strings.presetGlobalDesc),
-                Triple(RoutingStrategy.SMART_WHITELIST, strings.presetSmartWhitelist, strings.presetSmartWhitelistDesc),
-                Triple(RoutingStrategy.CUSTOM, strings.presetCustom, "Использование исключительно таблицы правил")
-            )
-
-            strategies.forEach { (strategy, title, desc) ->
-                val selected = settings.routingStrategy == strategy
-                Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f),
-                    border = androidx.compose.foundation.BorderStroke(
-                        width = if (selected) 1.5.dp else 1.dp,
-                        color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
-                    ),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { AppStateStore.updateSettings(settings.copy(routingStrategy = strategy)) }
-                ) {
-                    Row(
-                        modifier = Modifier.padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        RadioButton(
-                            selected = selected,
-                            onClick = { AppStateStore.updateSettings(settings.copy(routingStrategy = strategy)) },
-                            colors = RadioButtonDefaults.colors(selectedColor = MaterialTheme.colorScheme.primary)
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Column {
-                            Text(text = title, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                            Text(text = desc, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    }
-                }
-            }
-
-            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
-
-            // Quick Switches (Adblock on by default!)
-            SettingsToggleRow(
-                title = strings.blockAds,
-                subtitle = strings.blockAdsDesc,
-                checked = settings.blockAds,
-                onCheckedChange = { AppStateStore.updateSettings(settings.copy(blockAds = it)) }
-            )
-
-            SettingsToggleRow(
-                title = strings.bypassLan,
-                subtitle = strings.bypassLanDesc,
-                checked = settings.bypassLan,
-                onCheckedChange = { AppStateStore.updateSettings(settings.copy(bypassLan = it)) }
-            )
-
-            SettingsToggleRow(
-                title = strings.bypassRu,
-                subtitle = strings.bypassRuDesc,
-                checked = settings.bypassRu,
-                onCheckedChange = { AppStateStore.updateSettings(settings.copy(bypassRu = it)) }
-            )
-
-            SettingsToggleRow(
-                title = strings.dynamicRuAppScanner,
-                subtitle = strings.dynamicRuAppScannerDesc,
-                checked = settings.dynamicRuAppScannerEnabled,
-                onCheckedChange = { AppStateStore.updateSettings(settings.copy(dynamicRuAppScannerEnabled = it)) }
-            )
-
-            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
-
-            // Granular Rules Header
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        // 1. Built-in Base Routing Rules
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+        ) {
+            Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Text(
-                    text = strings.rulesTitle,
+                    text = if (settings.language == AppLanguage.RU) "Базовые правила маршрутизации" else "Base Routing Rules",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface
+                    color = MaterialTheme.colorScheme.primary
                 )
-                Button(
-                    onClick = onAddRule,
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text(strings.addRule, fontSize = 12.sp)
-                }
+
+                // Quick Switches (Adblock, LAN, RU Bypass)
+                SettingsToggleRow(
+                    title = strings.blockAds,
+                    subtitle = strings.blockAdsDesc,
+                    checked = settings.blockAds,
+                    onCheckedChange = { AppStateStore.updateSettings(settings.copy(blockAds = it)) }
+                )
+
+                SettingsToggleRow(
+                    title = strings.bypassLan,
+                    subtitle = strings.bypassLanDesc,
+                    checked = settings.bypassLan,
+                    onCheckedChange = { AppStateStore.updateSettings(settings.copy(bypassLan = it)) }
+                )
+
+                SettingsToggleRow(
+                    title = strings.bypassRu,
+                    subtitle = strings.bypassRuDesc,
+                    checked = settings.bypassRu,
+                    onCheckedChange = { AppStateStore.updateSettings(settings.copy(bypassRu = it)) }
+                )
             }
+        }
 
-            // Rules List
-            settings.customRules.forEach { rule ->
-                val outboundColor = when (rule.outbound) {
-                    "direct" -> Color(0xFF00E676)
-                    "proxy" -> Color(0xFF00E5FF)
-                    else -> Color(0xFFFF5252)
+        // 2. Custom User Rules
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+        ) {
+            Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = strings.rulesTitle,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = if (settings.language == AppLanguage.RU) "Индивидуальные правила доменов и IP адресов" else "Custom domain and IP rules",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Button(
+                        onClick = onAddRule,
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text(strings.addRule, fontSize = 12.sp)
+                    }
                 }
 
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onEditRule(rule) }
-                ) {
-                    Row(
-                        modifier = Modifier.padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                if (settings.customRules.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 12.dp),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Switch(
-                            checked = rule.enabled,
-                            onCheckedChange = { AppStateStore.updateCustomRule(rule.copy(enabled = it)) }
+                        Text(
+                            text = if (settings.language == AppLanguage.RU) {
+                                "Нет пользовательских правил.\nВесь трафик маршрутизируется согласно базовым правилам выше."
+                            } else {
+                                "No custom rules configured.\nAll traffic follows base routing rules."
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
                         )
-                        Spacer(Modifier.width(12.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = rule.name,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 13.sp,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Spacer(Modifier.width(8.dp))
-                                Surface(
-                                    shape = RoundedCornerShape(4.dp),
-                                    color = outboundColor.copy(alpha = 0.15f)
-                                ) {
-                                    Text(
-                                        text = rule.outbound.uppercase(),
-                                        color = outboundColor,
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                    )
-                                }
-                            }
-                            if (rule.domains.isNotEmpty()) {
-                                Text(
-                                    text = "Domains: ${rule.domains.joinToString(", ")}",
-                                    fontSize = 11.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1
-                                )
-                            }
-                            if (rule.ips.isNotEmpty()) {
-                                Text(
-                                    text = "IPs: ${rule.ips.joinToString(", ")}",
-                                    fontSize = 11.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1
-                                )
-                            }
+                    }
+                } else {
+                    settings.customRules.forEach { rule ->
+                        val outboundColor = when (rule.outbound) {
+                            "direct" -> Color(0xFF00E676)
+                            "proxy" -> Color(0xFF00E5FF)
+                            else -> Color(0xFFFF5252)
                         }
-                        IconButton(onClick = { onEditRule(rule) }) {
-                            Icon(Icons.Default.Edit, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clickable { onEditRule(rule) }
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text(
+                                            text = rule.name,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 14.sp,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f, fill = false)
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                        Surface(
+                                            shape = RoundedCornerShape(4.dp),
+                                            color = outboundColor.copy(alpha = 0.15f)
+                                        ) {
+                                            Text(
+                                                text = rule.outbound.uppercase(),
+                                                color = outboundColor,
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                maxLines = 1,
+                                                softWrap = false,
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                    }
+
+                                    Spacer(Modifier.height(4.dp))
+
+                                    if (rule.domains.isNotEmpty()) {
+                                        Text(
+                                            text = "Domains: ${rule.domains.joinToString(", ")}",
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                    if (rule.ips.isNotEmpty()) {
+                                        Text(
+                                            text = "IPs: ${rule.ips.joinToString(", ")}",
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+
+                                Spacer(Modifier.width(8.dp))
+
+                                IconButton(
+                                    onClick = { onEditRule(rule) },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(Icons.Default.Edit, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                                }
+
+                                Switch(
+                                    checked = rule.enabled,
+                                    onCheckedChange = { AppStateStore.updateCustomRule(rule.copy(enabled = it)) },
+                                    modifier = Modifier.padding(start = 4.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -677,15 +838,17 @@ private fun UiCategorySection(settings: AppSettings, strings: AppStrings) {
                 }
             }
 
-            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+            // Minimize to Tray (Desktop only)
+            if (!AppListHelper.isAndroid()) {
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
 
-            // Minimize to Tray
-            SettingsToggleRow(
-                title = strings.minimizeToTray,
-                subtitle = strings.minimizeToTrayDesc,
-                checked = settings.minimizeToTrayOnClose,
-                onCheckedChange = { AppStateStore.updateSettings(settings.copy(minimizeToTrayOnClose = it)) }
-            )
+                SettingsToggleRow(
+                    title = strings.minimizeToTray,
+                    subtitle = strings.minimizeToTrayDesc,
+                    checked = settings.minimizeToTrayOnClose,
+                    onCheckedChange = { AppStateStore.updateSettings(settings.copy(minimizeToTrayOnClose = it)) }
+                )
+            }
 
             HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
 

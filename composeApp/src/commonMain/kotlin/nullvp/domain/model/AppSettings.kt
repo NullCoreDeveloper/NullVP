@@ -80,29 +80,6 @@ data class AppSettings(
     val appVersion: String = "v1.0.0"
 ) {
     companion object {
-        fun defaultRoutingRules(): List<CustomRoutingRule> = listOf(
-            CustomRoutingRule(
-                id = "rule-ads",
-                name = "Реклама и аналитика (Adblock)",
-                outbound = "block",
-                domains = listOf("geosite:category-ads-all"),
-                enabled = true
-            ),
-            CustomRoutingRule(
-                id = "rule-lan",
-                name = "Локальная сеть (LAN)",
-                outbound = "direct",
-                ips = listOf("geoip:private", "192.168.0.0/16", "10.0.0.0/8", "172.16.0.0/12", "127.0.0.0/8"),
-                enabled = true
-            ),
-            CustomRoutingRule(
-                id = "rule-ru-gov-banks",
-                name = "Госсайты и банки РФ (Прямое подключение)",
-                outbound = "direct",
-                domains = listOf("geosite:category-gov-ru", "geosite:yandex", "geosite:mailru", "geosite:vk", "domain:sberbank.ru", "domain:sber.ru", "domain:tinkoff.ru", "domain:tbank.ru"),
-                ips = listOf("geoip:ru"),
-                enabled = true
-            )
-        )
+        fun defaultRoutingRules(): List<CustomRoutingRule> = emptyList()
     }
 }

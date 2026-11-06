@@ -22,10 +22,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import kotlinx.serialization.json.*
 import nullvp.domain.model.Profile
 import nullvp.domain.model.ProtocolType
 import nullvp.presentation.components.NullVpTextField
+import nullvp.presentation.components.ProtocolBadge
 import nullvp.theme.*
 import java.net.URLDecoder
 
@@ -190,18 +192,22 @@ fun EditProfileDialog(
     var rawConfig by remember { mutableStateOf(profile.protocolRawConfig) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
-    Dialog(onDismissRequest = onDismiss) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
         Surface(
             modifier = Modifier
-                .fillMaxWidth(0.96f)
+                .fillMaxWidth()
                 .fillMaxHeight(0.92f)
+                .padding(horizontal = 14.dp, vertical = 16.dp)
                 .clip(RoundedCornerShape(16.dp)),
             color = DarkSurface
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(20.dp)
+                    .padding(16.dp)
             ) {
                 // Header
                 Row(
@@ -209,32 +215,27 @@ fun EditProfileDialog(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = "Настройки профиля",
                             style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Bold,
-                            color = OnDarkSurface
+                            color = OnDarkSurface,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                         )
                         Text(
                             text = "${profile.protocolType.name} (${profile.serverAddress}:${profile.serverPort})",
                             style = MaterialTheme.typography.bodySmall,
-                            color = OnDarkSurfaceVariant
+                            color = OnDarkSurfaceVariant,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                         )
                     }
 
-                    Surface(
-                        color = NeonCyan.copy(alpha = 0.2f),
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Text(
-                            text = profile.protocolType.name,
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = NeonCyan,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
-                        )
-                    }
+                    Spacer(Modifier.width(10.dp))
+
+                    ProtocolBadge(protocolType = profile.protocolType)
                 }
 
                 Spacer(Modifier.height(14.dp))
@@ -297,6 +298,8 @@ fun EditProfileDialog(
                                         onValueChange = { serverAddress = it },
                                         label = { Text("Адрес сервера / IP / Домен") },
                                         singleLine = true,
+                                        showPasteButton = true,
+                                        showClearButton = true,
                                         modifier = Modifier.weight(1f)
                                     )
 
@@ -306,7 +309,8 @@ fun EditProfileDialog(
                                         label = { Text("Порт") },
                                         singleLine = true,
                                         showPasteButton = false,
-                                        modifier = Modifier.width(100.dp)
+                                        showClearButton = false,
+                                        modifier = Modifier.width(96.dp)
                                     )
                                 }
 
@@ -316,6 +320,8 @@ fun EditProfileDialog(
                                         onValueChange = { uuid = it },
                                         label = { Text("UUID пользователя") },
                                         singleLine = true,
+                                        showPasteButton = true,
+                                        showClearButton = true,
                                         modifier = Modifier.fillMaxWidth()
                                     )
                                     NullVpTextField(
@@ -324,6 +330,8 @@ fun EditProfileDialog(
                                         label = { Text("Flow (xtls-rprx-vision)") },
                                         placeholder = { Text("xtls-rprx-vision (или оставьте пустым)") },
                                         singleLine = true,
+                                        showPasteButton = false,
+                                        showClearButton = false,
                                         modifier = Modifier.fillMaxWidth()
                                     )
                                     NullVpTextField(
@@ -331,6 +339,8 @@ fun EditProfileDialog(
                                         onValueChange = { encryption = it },
                                         label = { Text("Encryption") },
                                         singleLine = true,
+                                        showPasteButton = false,
+                                        showClearButton = false,
                                         modifier = Modifier.fillMaxWidth()
                                     )
                                 } else if (profile.protocolType == ProtocolType.HYSTERIA2 ||
@@ -774,9 +784,11 @@ fun EditProfileDialog(
                                 onSave(updated)
                                 onDismiss()
                             },
-                            colors = ButtonDefaults.buttonColors(containerColor = NeonCyan, contentColor = Color.Black)
+                            colors = ButtonDefaults.buttonColors(containerColor = NeonCyan, contentColor = Color.Black),
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp)
                         ) {
-                            Text("Сохранить", fontWeight = FontWeight.Bold)
+                            Text("Сохранить", fontWeight = FontWeight.Bold, maxLines = 1)
                         }
                     }
                 }

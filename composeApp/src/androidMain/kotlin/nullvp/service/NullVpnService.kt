@@ -140,7 +140,7 @@ class NullVpnService : VpnService() {
                 stopCoreAndTProxy()
 
                 isStopping.set(false)
-                val notification = createNotification("Connected: ${profile.name}")
+                val notification = createNotification("Подключен: ${profile.name}")
                 if (Build.VERSION.SDK_INT >= 34) {
                     startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
                 } else {
@@ -278,10 +278,10 @@ class NullVpnService : VpnService() {
         // 1. User Per-App Proxy Configuration
         val isPerApp = settings.perAppProxyEnabled
         val isBypassMode = settings.perAppBypassMode
-        val selectedPackages = settings.perAppSelectedPackages
+        val selectedPackages = settings.perAppSelectedPackages.toSet()
 
         if (isPerApp && !isBypassMode) {
-            // PROXY MODE: only selected apps go through VPN.
+            // PROXY (WHITELIST) MODE: only selected apps go through VPN.
             selectedPackages.forEach { pkg ->
                 runCatching { builder.addAllowedApplication(pkg) }
             }
@@ -296,7 +296,7 @@ class NullVpnService : VpnService() {
             return
         }
 
-        // BYPASS MODE (or default full tunnel):
+        // BYPASS MODE:
         if (isPerApp && isBypassMode) {
             selectedPackages.forEach { pkg ->
                 if (pkg != selfPackage) {
@@ -306,7 +306,10 @@ class NullVpnService : VpnService() {
         }
 
         // 2. Dynamic Russian Apps Scanner (from v2whitelist)
-        if (settings.dynamicRuAppScannerEnabled) {
+        // Manual configuration has higher priority over dynamic:
+        // If user enabled Per-App Proxy, manual selection defines which apps are bypassed!
+        // If Per-App Proxy is disabled, dynamic scanner acts automatically on RU services.
+        if (settings.dynamicRuAppScannerEnabled && !isPerApp) {
             installed.forEach { pkg ->
                 val pName = pkg.packageName.lowercase()
 
@@ -441,25 +444,36 @@ class NullVpnService : VpnService() {
     }
 
     private fun createNotification(text: String): Notification {
-        val intent = Intent(this, MainActivity::class.java)
-        val pendingIntent = PendingIntent.getActivity(
-            this, 0, intent,
+        val openIntent = Intent(this, MainActivity::class.java)
+        val openPendingIntent = PendingIntent.getActivity(
+            this, 0, openIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        // Кнопка "Стоп" в уведомлении
+        val stopIntent = Intent(this, NullVpnService::class.java).apply {
+            action = ACTION_STOP
+        }
+        val stopPendingIntent = PendingIntent.getService(
+            this, 1, stopIntent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("NullVP")
+            .setContentTitle("NullVP • VPN активен")
             .setContentText(text)
-            .setSmallIcon(android.R.drawable.sym_def_app_icon)
-            .setContentIntent(pendingIntent)
+            .setSmallIcon(android.R.drawable.ic_lock_lock)
+            .setContentIntent(openPendingIntent)
             .setOngoing(true)
+            .setSilent(true)
+            .addAction(android.R.drawable.ic_delete, "⏹ Стоп", stopPendingIntent)
             .build()
     }
 
     companion object {
         const val ACTION_START = "nullvp.service.START"
         const val ACTION_STOP = "nullvp.service.STOP"
-        private const val CHANNEL_ID = "nullvp_channel"
+        private const val CHANNEL_ID = "nullvp_channel_v2"
         private const val NOTIFICATION_ID = 1001
         private const val DEEP_SLEEP_KICK_MS = 60_000L
     }
