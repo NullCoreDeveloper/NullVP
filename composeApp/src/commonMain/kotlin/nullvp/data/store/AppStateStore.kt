@@ -3,6 +3,8 @@ package nullvp.data.store
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 import nullvp.domain.model.AppSettings
 import nullvp.domain.model.CustomRoutingRule
 import nullvp.domain.model.OperationMode
@@ -11,6 +13,15 @@ import nullvp.domain.model.ProtocolType
 import nullvp.domain.model.Subscription
 import nullvp.domain.protocol.ProtocolRegistry
 import nullvp.i18n.AppLanguage
+import nullvp.platform.StorageHelper
+
+@Serializable
+data class SavedAppState(
+    val profiles: List<Profile> = emptyList(),
+    val subscriptions: List<Subscription> = emptyList(),
+    val selectedProfileId: String? = null,
+    val settings: AppSettings = AppSettings()
+)
 
 enum class LogLevel {
     DEBUG, INFO, WARN, ERROR
@@ -81,29 +92,49 @@ object AppStateStore {
     private val _selectedProfileId = MutableStateFlow<String?>(defaultProfiles.firstOrNull()?.id)
     val selectedProfileId: StateFlow<String?> = _selectedProfileId.asStateFlow()
 
-    private val _subscriptions = MutableStateFlow<List<Subscription>>(
-        listOf(
-            Subscription(
-                id = "sub_main",
-                name = "3x-ui Main Subscription",
-                url = "https://vpn.example.com/sub/token123",
-                uploadBytes = 2_147_483_648L,   // 2 GB
-                downloadBytes = 18_253_611_008L, // ~17 GB
-                totalBytes = 107_374_182_400L,   // 100 GB
-                expireTimestamp = System.currentTimeMillis() + 86400000L * 25, // 25 days remaining
-                lastUpdated = System.currentTimeMillis()
-            )
-        )
-    )
+    private val _subscriptions = MutableStateFlow<List<Subscription>>(emptyList())
     val subscriptions: StateFlow<List<Subscription>> = _subscriptions.asStateFlow()
 
     private val _settings = MutableStateFlow(AppSettings())
     val settings: StateFlow<AppSettings> = _settings.asStateFlow()
 
+    private val jsonSerializer = Json {
+        prettyPrint = true
+        ignoreUnknownKeys = true
+    }
+
+    init {
+        val savedJson = StorageHelper.readStateJson()
+        if (!savedJson.isNullOrBlank()) {
+            runCatching {
+                val loaded = jsonSerializer.decodeFromString(SavedAppState.serializer(), savedJson)
+                if (loaded.profiles.isNotEmpty()) {
+                    _profiles.value = loaded.profiles
+                }
+                _subscriptions.value = loaded.subscriptions
+                _selectedProfileId.value = loaded.selectedProfileId ?: loaded.profiles.firstOrNull()?.id
+                _settings.value = loaded.settings
+            }
+        }
+    }
+
+    private fun saveState() {
+        val state = SavedAppState(
+            profiles = _profiles.value,
+            subscriptions = _subscriptions.value,
+            selectedProfileId = _selectedProfileId.value,
+            settings = _settings.value
+        )
+        val text = runCatching { jsonSerializer.encodeToString(SavedAppState.serializer(), state) }.getOrNull()
+        if (text != null) {
+            StorageHelper.writeStateJson(text)
+        }
+    }
+
     private val _logs = MutableStateFlow<List<LogEntry>>(
         listOf(
             LogEntry(level = LogLevel.INFO, tag = "CoreEngine", message = "NullVP Client v1.0.0 initialized"),
-            LogEntry(level = LogLevel.INFO, tag = "Platform", message = "System environment ready. TUN and Proxy routes configured"),
+            LogEntry(level = LogLevel.INFO, tag = "Platform", message = "System environment ready. Proxy and routing configured"),
             LogEntry(level = LogLevel.INFO, tag = "Routing", message = "Bypass rules loaded: RU services and private LAN direct, Ads blocked"),
             LogEntry(level = LogLevel.DEBUG, tag = "DNS", message = "Remote DNS: 1.1.1.1 (DoH), Direct DNS: 77.88.8.8")
         )
@@ -112,6 +143,7 @@ object AppStateStore {
 
     fun selectProfile(id: String) {
         _selectedProfileId.value = id
+        saveState()
     }
 
     fun addProfile(profile: Profile) {
@@ -125,12 +157,14 @@ object AppStateStore {
         list.add(0, safeProfile)
         _profiles.value = list
         _selectedProfileId.value = safeProfile.id
+        saveState()
         addLog(LogLevel.INFO, "ProfileManager", "Added profile '${safeProfile.name}' (${safeProfile.protocolType})")
     }
 
     fun updateProfile(profile: Profile) {
         val list = _profiles.value.map { if (it.id == profile.id) profile else it }
         _profiles.value = list
+        saveState()
         addLog(LogLevel.INFO, "ProfileManager", "Updated profile '${profile.name}'")
     }
 
@@ -140,6 +174,7 @@ object AppStateStore {
         if (_selectedProfileId.value == id) {
             _selectedProfileId.value = list.firstOrNull()?.id
         }
+        saveState()
         addLog(LogLevel.INFO, "ProfileManager", "Deleted profile ID: $id")
     }
 
@@ -174,7 +209,16 @@ object AppStateStore {
         if (_selectedProfileId.value == null || !otherProfiles.any { it.id == _selectedProfileId.value }) {
             _selectedProfileId.value = otherProfiles.firstOrNull()?.id
         }
+        saveState()
         addLog(LogLevel.INFO, "SubscriptionManager", "Imported subscription '${sub.name}' with ${deduplicatedProfiles.size} nodes")
+    }
+
+    fun renameSubscription(subId: String, newName: String) {
+        _subscriptions.value = _subscriptions.value.map {
+            if (it.id == subId) it.copy(name = newName) else it
+        }
+        saveState()
+        addLog(LogLevel.INFO, "SubscriptionManager", "Renamed subscription to '$newName'")
     }
 
     fun deleteSubscription(subId: String) {
@@ -184,21 +228,25 @@ object AppStateStore {
         if (_selectedProfileId.value != null && remainingProfiles.none { it.id == _selectedProfileId.value }) {
             _selectedProfileId.value = remainingProfiles.firstOrNull()?.id
         }
+        saveState()
         addLog(LogLevel.INFO, "SubscriptionManager", "Deleted subscription ID: $subId")
     }
 
     fun updateSettings(newSettings: AppSettings) {
         _settings.value = newSettings
+        saveState()
         addLog(LogLevel.INFO, "Settings", "Settings updated. Mode: ${newSettings.operationMode}, Routing: ${newSettings.routingStrategy}")
     }
 
     fun setLanguage(lang: AppLanguage) {
         _settings.value = _settings.value.copy(language = lang)
+        saveState()
         addLog(LogLevel.INFO, "Settings", "Language changed to ${lang.displayName}")
     }
 
     fun setOperationMode(mode: OperationMode) {
         _settings.value = _settings.value.copy(operationMode = mode)
+        saveState()
         addLog(LogLevel.INFO, "Settings", "Operation mode changed to $mode")
     }
 
@@ -206,18 +254,21 @@ object AppStateStore {
         val updated = _settings.value.customRules.toMutableList()
         updated.add(rule)
         _settings.value = _settings.value.copy(customRules = updated)
+        saveState()
         addLog(LogLevel.INFO, "Routing", "Added custom rule '${rule.name}' -> ${rule.outbound}")
     }
 
     fun updateCustomRule(rule: CustomRoutingRule) {
         val updated = _settings.value.customRules.map { if (it.id == rule.id) rule else it }
         _settings.value = _settings.value.copy(customRules = updated)
+        saveState()
         addLog(LogLevel.INFO, "Routing", "Updated custom rule '${rule.name}'")
     }
 
     fun deleteCustomRule(ruleId: String) {
         val updated = _settings.value.customRules.filter { it.id != ruleId }
         _settings.value = _settings.value.copy(customRules = updated)
+        saveState()
         addLog(LogLevel.INFO, "Routing", "Deleted custom rule ID: $ruleId")
     }
 

@@ -1,6 +1,7 @@
 package nullvp
 
 import androidx.compose.animation.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -35,6 +36,9 @@ import nullvp.domain.model.Profile
 import nullvp.domain.protocol.ProtocolRegistry
 import nullvp.i18n.Localization
 import nullvp.platform.ClipboardHelper
+import nullvp.platform.PingHelper
+import nullvp.platform.PrivilegeHelper
+import nullvp.platform.UrlHelper
 import nullvp.presentation.components.ConnectButton
 import nullvp.presentation.components.ConnectState
 import nullvp.presentation.components.NullVpTextField
@@ -42,6 +46,8 @@ import nullvp.presentation.components.ServerCard
 import nullvp.presentation.components.SpeedRow
 import nullvp.presentation.components.SubscriptionCard
 import nullvp.presentation.dialogs.EditProfileDialog
+import nullvp.presentation.dialogs.SudoPasswordDialog
+import nullvp.presentation.dialogs.VkCaptchaDialog
 import nullvp.presentation.logs.LogsScreen
 import nullvp.presentation.settings.SettingsScreen
 import nullvp.theme.*
@@ -76,12 +82,23 @@ fun App() {
     val subscriptions by AppStateStore.subscriptions.collectAsState()
     val settings by AppStateStore.settings.collectAsState()
     val isRunning by coreEngine.isRunning.collectAsState()
+    val isConnecting by coreEngine.isConnecting.collectAsState()
+    val connectionError by coreEngine.connectionError.collectAsState()
     val stats by coreEngine.stats.collectAsState()
+    val captchaUrl by coreEngine.currentCaptchaUrl.collectAsState()
 
     val strings = Localization.get(settings.language)
 
     var currentScreen by remember { mutableStateOf(Screen.DASHBOARD) }
     var profileToEdit by remember { mutableStateOf<Profile?>(null) }
+
+    // Sudo & connection flow states
+    var showSudoDialog by remember { mutableStateOf(false) }
+    var pendingConnectOnSudo by remember { mutableStateOf(false) }
+
+    // Ping states
+    var isPingingActive by remember { mutableStateOf(false) }
+    var isBatchPinging by remember { mutableStateOf(false) }
 
     // Subscriptions import state
     var newSubUrl by remember { mutableStateOf("") }
@@ -97,6 +114,7 @@ fun App() {
 
     val connectState = when {
         isRunning -> ConnectState.CONNECTED
+        isConnecting -> ConnectState.CONNECTING
         else -> ConnectState.DISCONNECTED
     }
 
@@ -210,7 +228,7 @@ fun App() {
                                                 ConnectState.CONNECTING -> NeonCyan.copy(alpha = 0.18f)
                                                 ConnectState.DISCONNECTED -> DarkSurfaceVariant
                                             },
-                                            border = androidx.compose.foundation.BorderStroke(
+                                            border = BorderStroke(
                                                 1.dp,
                                                 when (connectState) {
                                                     ConnectState.CONNECTED -> CyberGreen.copy(alpha = 0.6f)
@@ -254,7 +272,37 @@ fun App() {
                                         }
                                     }
 
-                                    Spacer(modifier = Modifier.height(10.dp))
+                                    // Connection error alert if any
+                                    if (!connectionError.isNullOrBlank()) {
+                                        Surface(
+                                            shape = RoundedCornerShape(12.dp),
+                                            color = CyberRed.copy(alpha = 0.15f),
+                                            border = BorderStroke(1.dp, CyberRed.copy(alpha = 0.6f)),
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(14.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Icon(
+                                                    Icons.Default.Warning,
+                                                    contentDescription = null,
+                                                    tint = CyberRed,
+                                                    modifier = Modifier.size(22.dp)
+                                                )
+                                                Spacer(Modifier.width(10.dp))
+                                                Text(
+                                                    text = connectionError ?: "",
+                                                    color = CyberRed,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    fontWeight = FontWeight.Medium,
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.height(6.dp))
 
                                     // Big Connect Button with Neon Ring
                                     ConnectButton(
@@ -263,7 +311,12 @@ fun App() {
                                             if (isRunning) {
                                                 coreEngine.stop()
                                             } else if (activeProfile != null) {
-                                                coreEngine.start(activeProfile)
+                                                if (settings.operationMode == OperationMode.TUN && PrivilegeHelper.needsSudoForTun) {
+                                                    pendingConnectOnSudo = true
+                                                    showSudoDialog = true
+                                                } else {
+                                                    coreEngine.start(activeProfile)
+                                                }
                                             }
                                         }
                                     )
@@ -272,7 +325,7 @@ fun App() {
                                     Card(
                                         shape = RoundedCornerShape(14.dp),
                                         colors = CardDefaults.cardColors(containerColor = DarkSurface),
-                                        border = androidx.compose.foundation.BorderStroke(1.dp, DarkSurfaceVariant)
+                                        border = BorderStroke(1.dp, DarkSurfaceVariant)
                                     ) {
                                         Column(
                                             modifier = Modifier.padding(12.dp),
@@ -298,7 +351,14 @@ fun App() {
                                                     val selected = settings.operationMode == mode
                                                     FilterChip(
                                                         selected = selected,
-                                                        onClick = { AppStateStore.setOperationMode(mode) },
+                                                        onClick = {
+                                                            if (mode == OperationMode.TUN && PrivilegeHelper.needsSudoForTun) {
+                                                                pendingConnectOnSudo = false
+                                                                showSudoDialog = true
+                                                            } else {
+                                                                AppStateStore.setOperationMode(mode)
+                                                            }
+                                                        },
                                                         label = { Text(label, fontSize = 12.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal) },
                                                         colors = FilterChipDefaults.filterChipColors(
                                                             selectedContainerColor = NeonCyan.copy(alpha = 0.25f),
@@ -321,13 +381,73 @@ fun App() {
                                         txSpeedBps = stats.txSpeedBps
                                     )
 
-                                    // Selected Server Card
+                                    // Selected Server Card & Details
                                     if (activeProfile != null) {
-                                        ServerCard(
-                                            profile = activeProfile,
-                                            isSelected = true,
-                                            onSelect = { currentScreen = Screen.SERVERS }
-                                        )
+                                        Column(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                                        ) {
+                                            ServerCard(
+                                                profile = activeProfile,
+                                                isSelected = true,
+                                                onSelect = { currentScreen = Screen.SERVERS }
+                                            )
+
+                                            Card(
+                                                shape = RoundedCornerShape(12.dp),
+                                                colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                                                border = BorderStroke(1.dp, DarkSurfaceVariant),
+                                                modifier = Modifier.fillMaxWidth()
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth().padding(14.dp),
+                                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Column(modifier = Modifier.weight(1f)) {
+                                                        Text(
+                                                            text = "Адрес: ${activeProfile.serverAddress}:${activeProfile.serverPort}",
+                                                            style = MaterialTheme.typography.bodySmall,
+                                                            color = OnDarkSurfaceVariant
+                                                        )
+                                                        Text(
+                                                            text = "Протокол: ${activeProfile.protocolType.name}",
+                                                            style = MaterialTheme.typography.bodySmall,
+                                                            color = NeonCyan,
+                                                            fontWeight = FontWeight.SemiBold
+                                                        )
+                                                    }
+
+                                                    OutlinedButton(
+                                                        onClick = {
+                                                            if (!isPingingActive) {
+                                                                isPingingActive = true
+                                                                scope.launch {
+                                                                    val ping = PingHelper.measurePing(activeProfile.serverAddress, activeProfile.serverPort)
+                                                                    AppStateStore.updateProfile(activeProfile.copy(pingMs = ping))
+                                                                    isPingingActive = false
+                                                                }
+                                                            }
+                                                        },
+                                                        enabled = !isPingingActive,
+                                                        colors = ButtonDefaults.outlinedButtonColors(contentColor = NeonCyan),
+                                                        border = BorderStroke(1.dp, NeonCyan.copy(alpha = 0.6f)),
+                                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                                        shape = RoundedCornerShape(8.dp)
+                                                    ) {
+                                                        if (isPingingActive) {
+                                                            CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = NeonCyan)
+                                                            Spacer(Modifier.width(6.dp))
+                                                            Text("Тест...", fontSize = 12.sp)
+                                                        } else {
+                                                            Text("⚡", fontSize = 13.sp)
+                                                            Spacer(Modifier.width(4.dp))
+                                                            Text(if (activeProfile.pingMs >= 0) "${activeProfile.pingMs} ms" else "Пинг", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
                                     } else {
                                         Surface(
                                             shape = RoundedCornerShape(12.dp),
@@ -368,6 +488,37 @@ fun App() {
                                             color = OnDarkSurface
                                         )
                                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            // Batch Ping Button
+                                            OutlinedButton(
+                                                onClick = {
+                                                    if (!isBatchPinging) {
+                                                        isBatchPinging = true
+                                                        scope.launch {
+                                                            profiles.forEach { p ->
+                                                                launch {
+                                                                    val ping = PingHelper.measurePing(p.serverAddress, p.serverPort)
+                                                                    AppStateStore.updateProfile(p.copy(pingMs = ping))
+                                                                }
+                                                            }
+                                                            isBatchPinging = false
+                                                        }
+                                                    }
+                                                },
+                                                enabled = !isBatchPinging,
+                                                colors = ButtonDefaults.outlinedButtonColors(contentColor = NeonCyan),
+                                                border = BorderStroke(1.dp, NeonCyan.copy(alpha = 0.6f)),
+                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                                shape = RoundedCornerShape(8.dp)
+                                            ) {
+                                                if (isBatchPinging) {
+                                                    CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = NeonCyan)
+                                                } else {
+                                                    Text("⚡", fontSize = 13.sp)
+                                                }
+                                                Spacer(Modifier.width(4.dp))
+                                                Text("Пинг", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                            }
+
                                             OutlinedButton(
                                                 onClick = {
                                                     val clip = ClipboardHelper.getText()?.trim()
@@ -408,7 +559,7 @@ fun App() {
                                                     }
                                                 },
                                                 colors = ButtonDefaults.outlinedButtonColors(contentColor = NeonCyan),
-                                                border = androidx.compose.foundation.BorderStroke(1.dp, NeonCyan.copy(alpha = 0.6f)),
+                                                border = BorderStroke(1.dp, NeonCyan.copy(alpha = 0.6f)),
                                                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
                                                 shape = RoundedCornerShape(8.dp)
                                             ) {
@@ -453,12 +604,22 @@ fun App() {
                                                 }
                                                 IconButton(
                                                     onClick = { profileToEdit = profile },
-                                                    modifier = Modifier.padding(start = 4.dp)
+                                                    modifier = Modifier.padding(start = 2.dp)
                                                 ) {
                                                     Icon(
                                                         Icons.Default.Edit,
                                                         contentDescription = strings.editServer,
                                                         tint = OnDarkSurfaceVariant
+                                                    )
+                                                }
+                                                IconButton(
+                                                    onClick = { AppStateStore.deleteProfile(profile.id) },
+                                                    modifier = Modifier.padding(start = 2.dp)
+                                                ) {
+                                                    Icon(
+                                                        Icons.Default.Delete,
+                                                        contentDescription = "Удалить сервер",
+                                                        tint = CyberRed.copy(alpha = 0.8f)
                                                     )
                                                 }
                                             }
@@ -492,6 +653,17 @@ fun App() {
                                     Spacer(modifier = Modifier.height(16.dp))
 
                                     // Add Subscription / Import Box
+                                    NullVpTextField(
+                                        value = newSubName,
+                                        onValueChange = { newSubName = it },
+                                        placeholder = { Text(if (settings.language.code == "ru") "Название подписки (опционально)" else "Subscription name (optional)") },
+                                        singleLine = true,
+                                        showClearButton = true,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+
+                                    Spacer(modifier = Modifier.height(8.dp))
+
                                     NullVpTextField(
                                         value = newSubUrl,
                                         onValueChange = {
@@ -531,8 +703,10 @@ fun App() {
                                             } else {
                                                 val profile = ProtocolRegistry.parse(input)
                                                 if (profile != null) {
-                                                    AppStateStore.addProfile(profile)
+                                                    val finalProfile = if (newSubName.isNotBlank()) profile.copy(name = newSubName.trim()) else profile
+                                                    AppStateStore.addProfile(finalProfile)
                                                     newSubUrl = ""
+                                                    newSubName = ""
                                                     currentScreen = Screen.SERVERS
                                                 } else {
                                                     subImportError = "Unsupported or invalid link format"
@@ -578,6 +752,9 @@ fun App() {
                                                 },
                                                 onDelete = {
                                                     AppStateStore.deleteSubscription(sub.id)
+                                                },
+                                                onRename = { newName ->
+                                                    AppStateStore.renameSubscription(sub.id, newName)
                                                 }
                                             )
                                         }
@@ -596,6 +773,37 @@ fun App() {
                     }
                 }
             }
+        }
+
+        // Sudo Password Dialog for TUN Mode
+        if (showSudoDialog) {
+            SudoPasswordDialog(
+                isOpen = showSudoDialog,
+                onDismiss = {
+                    showSudoDialog = false
+                    pendingConnectOnSudo = false
+                },
+                onConfirmed = {
+                    showSudoDialog = false
+                    AppStateStore.setOperationMode(OperationMode.TUN)
+                    if (pendingConnectOnSudo && activeProfile != null) {
+                        pendingConnectOnSudo = false
+                        coreEngine.start(activeProfile)
+                    }
+                },
+                onVerify = { pwd ->
+                    PrivilegeHelper.verifyAndCacheSudoPassword(pwd)
+                }
+            )
+        }
+
+        // VK Captcha Dialog
+        if (captchaUrl != null) {
+            VkCaptchaDialog(
+                captchaUrl = captchaUrl!!,
+                onSubmit = { token -> coreEngine.submitCaptcha(token) },
+                onDismiss = { coreEngine.submitCaptcha("") }
+            )
         }
 
         // Edit Profile Dialog
@@ -621,7 +829,7 @@ private fun NullVpSidebar(
     Surface(
         color = DarkSurface,
         modifier = Modifier.fillMaxHeight().width(94.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, DarkSurfaceVariant.copy(alpha = 0.5f))
+        border = BorderStroke(1.dp, DarkSurfaceVariant.copy(alpha = 0.5f))
     ) {
         Column(
             modifier = Modifier.fillMaxSize().padding(vertical = 16.dp),

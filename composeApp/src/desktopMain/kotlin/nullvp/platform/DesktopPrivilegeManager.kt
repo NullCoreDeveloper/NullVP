@@ -31,6 +31,26 @@ object DesktopPrivilegeManager {
     }
 
     /**
+     * Verifies sudo password using sudo -S -k -v.
+     */
+    fun verifySudoPassword(password: String): Pair<Boolean, String?> {
+        if (!isLinux) return true to null
+        return try {
+            val proc = ProcessBuilder("sudo", "-S", "-k", "-v")
+                .redirectErrorStream(true)
+                .start()
+            proc.outputStream.bufferedWriter().use { writer ->
+                writer.write("$password\n")
+                writer.flush()
+            }
+            val exit = proc.waitFor()
+            (exit == 0) to if (exit == 0) null else "Неверный пароль sudo"
+        } catch (e: Exception) {
+            false to (e.message ?: "Ошибка вызова sudo")
+        }
+    }
+
+    /**
      * Helper command for users to grant passwordless capability once.
      */
     fun getSetcapCommand(binaryPath: String): String {

@@ -6,15 +6,17 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import nullvp.domain.model.Subscription
 import nullvp.theme.*
 
@@ -23,8 +25,12 @@ fun SubscriptionCard(
     subscription: Subscription,
     onRefresh: () -> Unit,
     onDelete: () -> Unit,
+    onRename: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    var showRenameDialog by remember { mutableStateOf(false) }
+    var editName by remember(subscription.name) { mutableStateOf(subscription.name) }
+
     Card(
         modifier = modifier
             .fillMaxWidth()
@@ -56,6 +62,9 @@ fun SubscriptionCard(
                 }
 
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    IconButton(onClick = { showRenameDialog = true }) {
+                        Icon(Icons.Default.Edit, contentDescription = "Rename", tint = OnDarkSurfaceVariant)
+                    }
                     IconButton(onClick = onRefresh) {
                         Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = NeonCyan)
                     }
@@ -102,26 +111,71 @@ fun SubscriptionCard(
                     color = OnDarkSurfaceVariant
                 )
 
-                Text(
-                    text = if (subscription.expireTimestamp > 0) {
-                        val daysRemaining = (subscription.expireTimestamp - System.currentTimeMillis()) / (1000 * 3600 * 24)
-                        if (daysRemaining > 0) "$daysRemaining days left" else "Expired"
-                    } else "No Expiry",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    color = if (subscription.expireTimestamp > 0 && subscription.expireTimestamp < System.currentTimeMillis()) CyberRed else CyberGreen
-                )
+                if (subscription.expireTimestamp > 0) {
+                    val daysLeft = ((subscription.expireTimestamp - System.currentTimeMillis()) / (1000 * 60 * 60 * 24)).coerceAtLeast(0)
+                    Text(
+                        text = "$daysLeft days left",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (daysLeft < 3) CyberAmber else OnDarkSurfaceVariant
+                    )
+                }
             }
         }
+    }
+
+    if (showRenameDialog) {
+        AlertDialog(
+            onDismissRequest = { showRenameDialog = false },
+            title = { Text("Переименовать подписку", color = OnDarkSurface, fontWeight = FontWeight.Bold) },
+            text = {
+                Column {
+                    Text("Введите новое название подписки:", style = MaterialTheme.typography.bodyMedium, color = OnDarkSurfaceVariant)
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = editName,
+                        onValueChange = { editName = it },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = NeonCyan,
+                            unfocusedBorderColor = DarkSurfaceVariant,
+                            focusedTextColor = OnDarkSurface,
+                            unfocusedTextColor = OnDarkSurface
+                        )
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (editName.isNotBlank()) {
+                            onRename(editName.trim())
+                        }
+                        showRenameDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = NeonCyan, contentColor = Color.Black)
+                ) {
+                    Text("Сохранить", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRenameDialog = false }) {
+                    Text("Отмена", color = OnDarkSurfaceVariant)
+                }
+            },
+            containerColor = DarkSurface
+        )
     }
 }
 
 private fun formatBytes(bytes: Long): String {
-    return when {
-        bytes >= 1024L * 1024L * 1024L -> String.format("%.1f GB", bytes / (1024.0 * 1024.0 * 1024.0))
-        bytes >= 1024L * 1024L -> String.format("%.1f MB", bytes / (1024.0 * 1024.0))
-        bytes >= 1024L -> String.format("%.1f KB", bytes / 1024.0)
-        else -> "$bytes B"
+    if (bytes <= 0) return "0 B"
+    val units = arrayOf("B", "KB", "MB", "GB", "TB")
+    var b = bytes.toDouble()
+    var i = 0
+    while (b >= 1024 && i < units.size - 1) {
+        b /= 1024
+        i++
     }
+    val rounded = (b * 100).toLong() / 100.0
+    return "$rounded ${units[i]}"
 }
-

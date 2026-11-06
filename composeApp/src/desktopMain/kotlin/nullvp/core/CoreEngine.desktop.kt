@@ -22,6 +22,12 @@ class DesktopCoreEngine : CoreEngine {
     private val _isRunning = MutableStateFlow(false)
     override val isRunning: StateFlow<Boolean> = _isRunning.asStateFlow()
 
+    private val _isConnecting = MutableStateFlow(false)
+    override val isConnecting: StateFlow<Boolean> = _isConnecting.asStateFlow()
+
+    private val _connectionError = MutableStateFlow<String?>(null)
+    override val connectionError: StateFlow<String?> = _connectionError.asStateFlow()
+
     private val _stats = MutableStateFlow(TrafficStats())
     override val stats: StateFlow<TrafficStats> = _stats.asStateFlow()
 
@@ -78,78 +84,128 @@ class DesktopCoreEngine : CoreEngine {
     }
 
     override fun start(profile: Profile): Result<Unit> {
-        return runCatching {
-            killExistingZombieProcesses()
+        _isConnecting.value = true
+        _connectionError.value = null
 
-            val settings = AppStateStore.settings.value
-            appendLog("[START] Preparing profile '${profile.name}' (${profile.protocolType})")
-            AppStateStore.addLog(LogLevel.INFO, "CoreEngine", "Building real configuration for profile '${profile.name}'")
+        scope.launch(Dispatchers.IO) {
+            try {
+                killExistingZombieProcesses()
 
-            // 1. Build real JSON configuration
-            val configContent = RealXrayConfigBuilder.buildJson(profile, settings)
-            val configFile = File(CONFIG_PATH)
-            configFile.writeText(configContent)
-            appendLog("[CONFIG] Generated config at $CONFIG_PATH (${configContent.length} bytes)")
+                val settings = AppStateStore.settings.value
+                appendLog("[START] Preparing profile '${profile.name}' (${profile.protocolType})")
+                AppStateStore.addLog(LogLevel.INFO, "CoreEngine", "Building configuration for '${profile.name}'")
 
-            // 2. Select appropriate binary
-            val isCustomDriver = profile.protocolType == ProtocolType.MASTER_DNS || profile.protocolType == ProtocolType.VK_TURN
-            val binaryName = if (isCustomDriver) "nullvp-core" else "xray"
-            val binary = findBinary(binaryName) ?: findBinary("xray")
-            if (binary == null) {
-                val err = "Executable binary '$binaryName' not found! Make sure ./bin/$binaryName exists."
-                appendLog("[ERROR] $err")
-                AppStateStore.addLog(LogLevel.ERROR, "CoreEngine", err)
-                error(err)
-            }
+                // 1. Build real JSON configuration
+                val configContent = RealXrayConfigBuilder.buildJson(profile, settings)
+                val configFile = File(CONFIG_PATH)
+                configFile.writeText(configContent)
+                appendLog("[CONFIG] Generated config at $CONFIG_PATH (${configContent.length} bytes)")
 
-            // 3. Launch Core Process
-            val assetDir = findAssetDir()
-            val pb = ProcessBuilder(binary.absolutePath, "run", "-c", configFile.absolutePath)
-            if (assetDir != null) {
-                pb.environment()["XRAY_LOCATION_ASSET"] = assetDir.absolutePath
-            }
-            pb.redirectErrorStream(true)
+                // 2. Select appropriate binary
+                val isCustomDriver = profile.protocolType == ProtocolType.MASTER_DNS || profile.protocolType == ProtocolType.VK_TURN
+                val binaryName = if (isCustomDriver) "nullvp-core" else "xray"
+                val binary = findBinary(binaryName) ?: findBinary("xray")
+                if (binary == null) {
+                    val err = "Executable binary '$binaryName' not found! Make sure ./bin/$binaryName exists."
+                    appendLog("[ERROR] $err")
+                    AppStateStore.addLog(LogLevel.ERROR, "CoreEngine", err)
+                    _isConnecting.value = false
+                    _connectionError.value = err
+                    return@launch
+                }
 
-            val proc = pb.start()
-            coreProcess = proc
-            _isRunning.value = true
+                // 3. Launch Core Process
+                val assetDir = findAssetDir()
+                val pb = if (isCustomDriver) {
+                    ProcessBuilder(
+                        binary.absolutePath,
+                        "-socks-port", settings.socksPort.toString(),
+                        "-http-port", settings.httpPort.toString(),
+                        "-c", configFile.absolutePath,
+                        "-proto", profile.protocolType.name
+                    )
+                } else {
+                    ProcessBuilder(binary.absolutePath, "run", "-c", configFile.absolutePath)
+                }
 
-            // Read live output from process
-            logJob?.cancel()
-            logJob = scope.launch(Dispatchers.IO) {
-                try {
-                    BufferedReader(InputStreamReader(proc.inputStream)).use { reader ->
-                        var line: String? = null
-                        while (proc.isAlive && reader.readLine().also { line = it } != null) {
-                            line?.let { l ->
-                                appendLog("[CORE] $l")
-                                val lvl = if (l.contains("error", true)) LogLevel.ERROR else if (l.contains("warning", true)) LogLevel.WARN else LogLevel.INFO
-                                AppStateStore.addLog(lvl, "XrayCore", l)
+                if (assetDir != null) {
+                    pb.environment()["XRAY_LOCATION_ASSET"] = assetDir.absolutePath
+                }
+                pb.redirectErrorStream(true)
+
+                val proc = pb.start()
+                coreProcess = proc
+
+                // Read live output from process in background
+                logJob?.cancel()
+                logJob = scope.launch(Dispatchers.IO) {
+                    try {
+                        BufferedReader(InputStreamReader(proc.inputStream)).use { reader ->
+                            var line: String? = null
+                            while (reader.readLine().also { line = it } != null) {
+                                line?.let { l ->
+                                    appendLog("[CORE] $l")
+                                    val lvl = if (l.contains("error", true) || l.contains("failed", true)) LogLevel.ERROR
+                                    else if (l.contains("warning", true)) LogLevel.WARN
+                                    else LogLevel.INFO
+                                    AppStateStore.addLog(lvl, if (isCustomDriver) "NullvpCore" else "XrayCore", l)
+
+                                    if (l.contains("[CAPTCHA_REQUIRED]")) {
+                                        val url = l.substringAfter("[CAPTCHA_REQUIRED]").trim()
+                                        _currentCaptchaUrl.value = url
+                                        AppStateStore.addLog(LogLevel.WARN, "VK_TURN", "Требуется решение капчи: $url")
+                                    }
+
+                                    if (l.contains("Failed to start:") || l.contains("fatal error")) {
+                                        _connectionError.value = l.substringAfter("Failed to start:").trim()
+                                    }
+                                }
                             }
                         }
+                    } catch (_: Exception) {}
+                }
+
+                // Check if process stayed alive after 300ms
+                delay(300)
+                if (!proc.isAlive) {
+                    val exit = proc.exitValue()
+                    val err = _connectionError.value ?: "Процесс ядра завершился сразу после старта (код $exit)"
+                    _isRunning.value = false
+                    _isConnecting.value = false
+                    _connectionError.value = err
+                    AppStateStore.addLog(LogLevel.ERROR, "CoreEngine", err)
+                    return@launch
+                }
+
+                _isRunning.value = true
+                _isConnecting.value = false
+
+                // 4. Handle System Routing Mode
+                when (settings.operationMode) {
+                    OperationMode.SYSTEM_PROXY -> {
+                        DesktopPrivilegeManager.enableSystemProxy("127.0.0.1", settings.socksPort)
+                        appendLog("[PROXY] System proxy enabled on 127.0.0.1:${settings.socksPort}")
+                        AppStateStore.addLog(LogLevel.INFO, "Routing", "OS System Proxy active on 127.0.0.1:${settings.socksPort}")
                     }
-                } catch (_: Exception) {}
-            }
+                    OperationMode.TUN -> {
+                        startTunDevice(settings.socksPort)
+                    }
+                    OperationMode.PROXY_ONLY -> {
+                        appendLog("[PROXY] Local proxy ports open: SOCKS5=${settings.socksPort}, HTTP=${settings.httpPort}")
+                        AppStateStore.addLog(LogLevel.INFO, "Routing", "Manual Proxy ports open: SOCKS5=${settings.socksPort}, HTTP=${settings.httpPort}")
+                    }
+                }
 
-            // 4. Handle System Routing Mode
-            when (settings.operationMode) {
-                OperationMode.SYSTEM_PROXY -> {
-                    DesktopPrivilegeManager.enableSystemProxy("127.0.0.1", settings.socksPort)
-                    appendLog("[PROXY] System proxy enabled on 127.0.0.1:${settings.socksPort}")
-                    AppStateStore.addLog(LogLevel.INFO, "Routing", "OS System Proxy active on 127.0.0.1:${settings.socksPort}")
-                }
-                OperationMode.TUN -> {
-                    startTunDevice(settings.socksPort)
-                }
-                OperationMode.PROXY_ONLY -> {
-                    appendLog("[PROXY] Local proxy ports open: SOCKS5=${settings.socksPort}, HTTP=${settings.httpPort}")
-                    AppStateStore.addLog(LogLevel.INFO, "Routing", "Manual Proxy ports open: SOCKS5=${settings.socksPort}, HTTP=${settings.httpPort}")
-                }
+                // 5. Start Real Traffic Stats Poller
+                startStatsPolling(settings.operationMode)
+            } catch (e: Exception) {
+                _isRunning.value = false
+                _isConnecting.value = false
+                _connectionError.value = e.message ?: "Неизвестная ошибка запуска"
+                AppStateStore.addLog(LogLevel.ERROR, "CoreEngine", "Error starting engine: ${e.message}")
             }
-
-            // 5. Start Real Traffic Stats Poller
-            startStatsPolling(settings.operationMode)
         }
+        return Result.success(Unit)
     }
 
     private fun startTunDevice(socksPort: Int) {
@@ -265,35 +321,49 @@ class DesktopCoreEngine : CoreEngine {
     }
 
     override fun stop(): Result<Unit> {
-        return runCatching {
-            appendLog("[STOP] Stopping core engine and resetting routes")
-            AppStateStore.addLog(LogLevel.INFO, "CoreEngine", "Stopping core engine and releasing resources")
-            _isRunning.value = false
+        _isConnecting.value = false
+        _isRunning.value = false
+        _connectionError.value = null
 
-            statsJob?.cancel()
-            statsJob = null
-            logJob?.cancel()
-            logJob = null
+        scope.launch(Dispatchers.IO) {
+            try {
+                appendLog("[STOP] Stopping core engine and resetting routes")
+                AppStateStore.addLog(LogLevel.INFO, "CoreEngine", "Stopping core engine and releasing resources")
 
-            // Disable system proxy
-            DesktopPrivilegeManager.disableSystemProxy()
+                statsJob?.cancel()
+                statsJob = null
+                logJob?.cancel()
+                logJob = null
 
-            // Kill processes
-            coreProcess?.destroy()
-            tunProcess?.destroy()
-            killExistingZombieProcesses()
+                // Disable system proxy
+                DesktopPrivilegeManager.disableSystemProxy()
 
-            coreProcess = null
-            tunProcess = null
+                // Kill processes
+                coreProcess?.destroy()
+                tunProcess?.destroy()
+                killExistingZombieProcesses()
 
-            _stats.value = TrafficStats(isConnected = false)
-            appendLog("[STOP] Stopped successfully")
-            AppStateStore.addLog(LogLevel.INFO, "CoreEngine", "Engine stopped.")
+                coreProcess = null
+                tunProcess = null
+
+                _stats.value = TrafficStats(isConnected = false)
+                appendLog("[STOP] Stopped successfully")
+                AppStateStore.addLog(LogLevel.INFO, "CoreEngine", "Engine stopped.")
+            } catch (_: Exception) {}
         }
+        return Result.success(Unit)
     }
 
     override fun submitCaptcha(token: String) {
         appendLog("[CAPTCHA] Token submitted: ${token.take(8)}...")
+        scope.launch(Dispatchers.IO) {
+            coreProcess?.outputStream?.let { os ->
+                runCatching {
+                    os.write("CAPTCHA $token\n".toByteArray())
+                    os.flush()
+                }
+            }
+        }
         _currentCaptchaUrl.value = null
     }
 

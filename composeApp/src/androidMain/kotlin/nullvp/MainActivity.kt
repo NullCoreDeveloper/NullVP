@@ -10,6 +10,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         initializeAndroidCoreEngine(this)
         nullvp.platform.ClipboardHelper.setContext(this)
+        nullvp.platform.StorageHelper.setContext(this)
         setContent {
             App()
         }

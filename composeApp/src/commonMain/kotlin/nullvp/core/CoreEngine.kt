@@ -6,6 +6,8 @@ import nullvp.domain.model.TrafficStats
 
 interface CoreEngine {
     val isRunning: StateFlow<Boolean>
+    val isConnecting: StateFlow<Boolean>
+    val connectionError: StateFlow<String?>
     val stats: StateFlow<TrafficStats>
     val logs: StateFlow<List<String>>
     val currentCaptchaUrl: StateFlow<String?>

@@ -15,6 +15,12 @@ class AndroidCoreEngine(private var appContext: Context? = null) : CoreEngine {
     private val _isRunning = MutableStateFlow(false)
     override val isRunning: StateFlow<Boolean> = _isRunning.asStateFlow()
 
+    private val _isConnecting = MutableStateFlow(false)
+    override val isConnecting: StateFlow<Boolean> = _isConnecting.asStateFlow()
+
+    private val _connectionError = MutableStateFlow<String?>(null)
+    override val connectionError: StateFlow<String?> = _connectionError.asStateFlow()
+
     private val _stats = MutableStateFlow(TrafficStats())
     override val stats: StateFlow<TrafficStats> = _stats.asStateFlow()
 

@@ -119,8 +119,10 @@ object RealXrayConfigBuilder {
                                 add("geosite:yandex")
                                 add("geosite:mailru")
                                 add("geosite:vk")
-                                add("geosite:sberbank")
-                                add("geosite:tinkoff")
+                                add("domain:sberbank.ru")
+                                add("domain:sber.ru")
+                                add("domain:tinkoff.ru")
+                                add("domain:tbank.ru")
                             }
                         }
                     }

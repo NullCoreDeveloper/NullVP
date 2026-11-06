@@ -33,8 +33,8 @@ data class AppSettings(
     // Language
     val language: AppLanguage = AppLanguage.RU,
 
-    // Mode of operation
-    val operationMode: OperationMode = OperationMode.TUN,
+    // Mode of operation (SYSTEM_PROXY by default as requested)
+    val operationMode: OperationMode = OperationMode.SYSTEM_PROXY,
 
     // Network & Ports
     val socksPort: Int = 10808,
@@ -90,7 +90,7 @@ data class AppSettings(
                 id = "rule-ru-gov-banks",
                 name = "Госсайты и банки РФ (Прямое подключение)",
                 outbound = "direct",
-                domains = listOf("geosite:category-gov-ru", "geosite:yandex", "geosite:mailru", "geosite:vk", "geosite:sberbank", "geosite:tinkoff"),
+                domains = listOf("geosite:category-gov-ru", "geosite:yandex", "geosite:mailru", "geosite:vk", "domain:sberbank.ru", "domain:sber.ru", "domain:tinkoff.ru", "domain:tbank.ru"),
                 ips = listOf("geoip:ru"),
                 enabled = true
             )
