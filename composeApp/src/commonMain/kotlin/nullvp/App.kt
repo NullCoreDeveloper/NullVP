@@ -19,6 +19,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -50,7 +51,6 @@ enum class Screen {
     LOGS
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun App() {
     val scope = rememberCoroutineScope()
@@ -102,63 +102,27 @@ fun App() {
             val isWideScreen = maxWidth >= 680.dp
 
             Row(modifier = Modifier.fillMaxSize()) {
-                // Wide Screen Navigation Rail (Desktop / Tablet)
+                // Wide Screen Custom Sidebar (Desktop / Tablet) - 100% bug-free WindowInsets
                 if (isWideScreen) {
-                    NavigationRail(
-                        containerColor = DarkSurface,
-                        contentColor = OnDarkSurface,
-                        modifier = Modifier.fillMaxHeight().width(90.dp)
-                    ) {
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text(
-                            text = "NullVP",
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = NeonCyan,
-                            modifier = Modifier.padding(bottom = 20.dp)
-                        )
-                        NavigationRailItem(
-                            selected = currentScreen == Screen.DASHBOARD,
-                            onClick = { currentScreen = Screen.DASHBOARD },
-                            icon = { Icon(Icons.Default.Home, contentDescription = strings.navHome) },
-                            label = { Text(strings.navHome, fontSize = 11.sp) }
-                        )
-                        NavigationRailItem(
-                            selected = currentScreen == Screen.SERVERS,
-                            onClick = { currentScreen = Screen.SERVERS },
-                            icon = { Icon(Icons.AutoMirrored.Filled.List, contentDescription = strings.navServers) },
-                            label = { Text(strings.navServers, fontSize = 11.sp) }
-                        )
-                        NavigationRailItem(
-                            selected = currentScreen == Screen.SUBSCRIPTIONS,
-                            onClick = { currentScreen = Screen.SUBSCRIPTIONS },
-                            icon = { Icon(Icons.Default.Refresh, contentDescription = strings.navSubscriptions) },
-                            label = { Text(strings.navSubscriptions, fontSize = 11.sp) }
-                        )
-                        NavigationRailItem(
-                            selected = currentScreen == Screen.SETTINGS,
-                            onClick = { currentScreen = Screen.SETTINGS },
-                            icon = { Icon(Icons.Default.Settings, contentDescription = strings.navSettings) },
-                            label = { Text(strings.navSettings, fontSize = 11.sp) }
-                        )
-                        NavigationRailItem(
-                            selected = currentScreen == Screen.LOGS,
-                            onClick = { currentScreen = Screen.LOGS },
-                            icon = { Icon(Icons.Default.Info, contentDescription = strings.navLogs) },
-                            label = { Text(strings.navLogs, fontSize = 11.sp) }
-                        )
-                    }
+                    NullVpSidebar(
+                        currentScreen = currentScreen,
+                        onSelectScreen = { currentScreen = it },
+                        strings = strings,
+                        version = settings.appVersion
+                    )
                 }
 
                 // Main Content Screen
                 Scaffold(
                     containerColor = DarkBackground,
+                    contentWindowInsets = WindowInsets(0, 0, 0, 0),
                     bottomBar = {
                         // Compact Mobile Bottom Bar
                         if (!isWideScreen) {
                             NavigationBar(
                                 containerColor = DarkSurface,
-                                contentColor = OnDarkSurface
+                                contentColor = OnDarkSurface,
+                                windowInsets = WindowInsets(0, 0, 0, 0)
                             ) {
                                 NavigationBarItem(
                                     selected = currentScreen == Screen.DASHBOARD,
@@ -301,7 +265,7 @@ fun App() {
                                         }
                                     )
 
-                                    // Operation Mode Segmented Switcher (Requirement #2)
+                                    // Operation Mode Switcher Pills
                                     Card(
                                         shape = RoundedCornerShape(14.dp),
                                         colors = CardDefaults.cardColors(containerColor = DarkSurface),
@@ -594,6 +558,80 @@ fun App() {
                 onDelete = { id -> AppStateStore.deleteProfile(id) },
                 onDuplicate = { p -> AppStateStore.duplicateProfile(p) }
             )
+        }
+    }
+}
+
+@Composable
+private fun NullVpSidebar(
+    currentScreen: Screen,
+    onSelectScreen: (Screen) -> Unit,
+    strings: nullvp.i18n.AppStrings,
+    version: String
+) {
+    Surface(
+        color = DarkSurface,
+        modifier = Modifier.fillMaxHeight().width(94.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, DarkSurfaceVariant.copy(alpha = 0.5f))
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(vertical = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = "NullVP",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.ExtraBold,
+                color = NeonCyan
+            )
+            Text(
+                text = version,
+                style = MaterialTheme.typography.labelSmall,
+                color = OnDarkSurfaceVariant,
+                fontSize = 10.sp
+            )
+
+            Spacer(Modifier.height(28.dp))
+
+            val navItems: List<Pair<Screen, Pair<ImageVector, String>>> = listOf(
+                Screen.DASHBOARD to (Icons.Default.Home to strings.navHome),
+                Screen.SERVERS to (Icons.AutoMirrored.Filled.List to strings.navServers),
+                Screen.SUBSCRIPTIONS to (Icons.Default.Refresh to strings.navSubscriptions),
+                Screen.SETTINGS to (Icons.Default.Settings to strings.navSettings),
+                Screen.LOGS to (Icons.Default.Info to strings.navLogs)
+            )
+
+            navItems.forEach { (screen, item) ->
+                val selected = currentScreen == screen
+                val (icon, label) = item
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = if (selected) NeonCyan.copy(alpha = 0.15f) else Color.Transparent,
+                    modifier = Modifier
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                        .fillMaxWidth()
+                        .clickable { onSelectScreen(screen) }
+                ) {
+                    Column(
+                        modifier = Modifier.padding(vertical = 10.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(
+                            imageVector = icon,
+                            contentDescription = label,
+                            tint = if (selected) NeonCyan else OnDarkSurfaceVariant,
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = label,
+                            fontSize = 11.sp,
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                            color = if (selected) NeonCyan else OnDarkSurfaceVariant
+                        )
+                    }
+                }
+            }
         }
     }
 }

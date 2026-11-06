@@ -24,10 +24,12 @@ rm -rf "$APPIMAGE_BUILD_DIR"
 mkdir -p "$APPIMAGE_BUILD_DIR"
 cp -a "$APP_DIR"/* "$APPIMAGE_BUILD_DIR"/
 
-# Копируем демон ядра
+# Копируем бинарники реальных ядер (xray, tun2socks, nullvp-core)
 mkdir -p "$APPIMAGE_BUILD_DIR/bin"
-cp "$ROOT_DIR/core-bridge/bin/nullvp-core" "$APPIMAGE_BUILD_DIR/bin/"
-chmod +x "$APPIMAGE_BUILD_DIR/bin/nullvp-core"
+cp -f "$ROOT_DIR/bin/xray" "$APPIMAGE_BUILD_DIR/bin/" 2>/dev/null || true
+cp -f "$ROOT_DIR/bin/tun2socks" "$APPIMAGE_BUILD_DIR/bin/" 2>/dev/null || true
+cp -f "$ROOT_DIR/bin/nullvp-core" "$APPIMAGE_BUILD_DIR/bin/" 2>/dev/null || cp -f "$ROOT_DIR/core-bridge/bin/nullvp-core" "$APPIMAGE_BUILD_DIR/bin/" 2>/dev/null || true
+chmod +x "$APPIMAGE_BUILD_DIR/bin"/* || true
 
 # Копируем геобазы и нативные библиотеки трея
 mkdir -p "$APPIMAGE_BUILD_DIR/lib/app/resources/assets"
