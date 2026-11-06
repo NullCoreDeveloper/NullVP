@@ -80,6 +80,7 @@ fun ProtocolBadge(protocolType: ProtocolType) {
         ProtocolType.VMESS -> "VMESS" to Color(0xFF00897B)
         ProtocolType.TROJAN -> "TROJAN" to Color(0xFFE91E63)
         ProtocolType.WIREGUARD -> "WG" to Color(0xFFF57C00)
+        ProtocolType.HYSTERIA2 -> "HY2" to Color(0xFFFF5252)
         ProtocolType.SHADOWSOCKS -> "SS" to Color(0xFF43A047)
         ProtocolType.CUSTOM -> "CUSTOM" to Color.Gray
     }

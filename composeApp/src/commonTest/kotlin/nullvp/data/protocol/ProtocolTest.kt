@@ -14,6 +14,10 @@ class ProtocolTest {
         ProtocolRegistry.register(MdnsProtocolHandler())
         ProtocolRegistry.register(VkTurnProtocolHandler())
         ProtocolRegistry.register(VlessProtocolHandler())
+        ProtocolRegistry.register(Hysteria2ProtocolHandler())
+        ProtocolRegistry.register(VmessProtocolHandler())
+        ProtocolRegistry.register(TrojanProtocolHandler())
+        ProtocolRegistry.register(ShadowsocksProtocolHandler())
     }
 
     @Test
@@ -30,8 +34,6 @@ class ProtocolTest {
 
     @Test
     fun testMdnsParsing() {
-        // {"DOMAINS":["dns.mytest.com"],"ENCRYPTION_KEY":"secret","DATA_ENCRYPTION_METHOD":1,"LISTEN_PORT":18000}
-        // Base64: eyJET01BSU5TIjpbImRucy5teXRlc3QuY29tIl0sIkVOQ1JZUFRJT05fS0VZIjoic2VjcmV0IiwiREFUQV9FTkNSWVBUSU9OX01FVEhPRCI6MSwiTElTVEVOX1BPUlQiOjE4MDAwfQ==
         val b64 = "eyJET01BSU5TIjpbImRucy5teXRlc3QuY29tIl0sIkVOQ1JZUFRJT05fS0VZIjoic2VjcmV0IiwiREFUQV9FTkNSWVBUSU9OX01FVEhPRCI6MSwiTElTVEVOX1BPUlQiOjE4MDAwfQ=="
         val link = "mdns://$b64#TestDNS"
         val profile = ProtocolRegistry.parse(link)
@@ -45,8 +47,6 @@ class ProtocolTest {
 
     @Test
     fun testFreeturnParsing() {
-        // {"v":1,"name":"FreeTurn Node","peer":"1.2.3.4:443","vk":"https://vk.com/call/join/test"}
-        // Base64URL: eyJ2IjoxLCJuYW1lIjoiRnJlZVR1cm4gTm9kZSIsInBlZXIiOiIxLjIuMy40OjQ0MyIsInZrIjoiaHR0cHM6Ly92ay5jb20vY2FsbC9qb2luL3Rlc3QifQ
         val b64url = "eyJ2IjoxLCJuYW1lIjoiRnJlZVR1cm4gTm9kZSIsInBlZXIiOiIxLjIuMy40OjQ0MyIsInZrIjoiaHR0cHM6Ly92ay5jb20vY2FsbC9qb2luL3Rlc3QifQ"
         val link = "freeturn://$b64url"
         val profile = ProtocolRegistry.parse(link)
@@ -57,5 +57,28 @@ class ProtocolTest {
         assertEquals(443, profile.serverPort)
         assertEquals(ProtocolType.VK_TURN, profile.protocolType)
     }
-}
 
+    @Test
+    fun testHysteria2Parsing() {
+        val link = "hy2://secretPass123@hy2.myserver.com:8443/?sni=mycdn.com&insecure=1&obfs=salamander&obfs-password=pwd#My%20Hysteria2"
+        val profile = ProtocolRegistry.parse(link)
+
+        assertNotNull(profile)
+        assertEquals("My Hysteria2", profile.name)
+        assertEquals("hy2.myserver.com", profile.serverAddress)
+        assertEquals(8443, profile.serverPort)
+        assertEquals(ProtocolType.HYSTERIA2, profile.protocolType)
+    }
+
+    @Test
+    fun testTrojanParsing() {
+        val link = "trojan://password123@trojan.example.com:443?sni=example.com#My%20Trojan"
+        val profile = ProtocolRegistry.parse(link)
+
+        assertNotNull(profile)
+        assertEquals("My Trojan", profile.name)
+        assertEquals("trojan.example.com", profile.serverAddress)
+        assertEquals(443, profile.serverPort)
+        assertEquals(ProtocolType.TROJAN, profile.protocolType)
+    }
+}

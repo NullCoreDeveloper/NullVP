@@ -9,6 +9,7 @@ enum class ProtocolType {
     TROJAN,
     SHADOWSOCKS,
     WIREGUARD,
+    HYSTERIA2,
     MASTER_DNS,
     VK_TURN,
     CUSTOM
@@ -50,4 +51,3 @@ data class TrafficStats(
     val activeStreams: Int = 0,
     val isConnected: Boolean = false
 )
-
