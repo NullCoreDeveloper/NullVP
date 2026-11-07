@@ -35,7 +35,14 @@ import kotlin.random.Random
 
 actual object PingHelper {
     private val defaultDnsResolvers = listOf(
-        "77.88.8.8", "77.88.8.1", "1.1.1.1", "1.0.0.1", "8.8.8.8", "8.8.4.4", "9.9.9.9", "208.67.222.222"
+        "1.1.1.1", "1.0.0.1",
+        "8.8.8.8", "8.8.4.4",
+        "9.9.9.9", "149.112.112.112",
+        "208.67.222.222", "208.67.220.220",
+        "208.67.222.123", "208.67.220.123",
+        "4.2.2.1", "4.2.2.2", "4.2.2.3", "4.2.2.4",
+        "84.200.69.80", "84.200.70.40",
+        "64.6.64.6", "64.6.65.6"
     )
 
     actual suspend fun measurePing(host: String, port: Int, timeoutMs: Int): Long = withContext(Dispatchers.IO) {
@@ -107,9 +114,9 @@ actual object PingHelper {
             resElem.contentOrNull?.split(",", "\n", ";")?.map { it.trim() }?.filter { it.isNotEmpty() }?.let { resolvers.addAll(it) }
         }
 
-        if (resolvers.isEmpty()) {
-            resolvers.addAll(defaultDnsResolvers)
-        }
+        // Merge with full reliable pool and filter out known broken resolvers (e.g. Yandex 77.88.8.x which block tunnel queries)
+        resolvers.addAll(defaultDnsResolvers)
+        val filteredResolvers = resolvers.filter { !it.startsWith("77.88.8.") }.distinct()
 
         val probeDomain = rawObj?.let { obj ->
             val dElem = obj["DOMAINS"] ?: obj["domains"] ?: obj["DOMAIN"] ?: obj["domain"]
@@ -121,7 +128,7 @@ actual object PingHelper {
         }?.takeIf { it.isNotBlank() && !it.contains("{{") } ?: profile.serverAddress.ifBlank { "google.com" }
 
         val perResolverTimeout = minOf(timeoutMs, 2000)
-        val distinctResolvers = resolvers.distinct()
+        val distinctResolvers = filteredResolvers
 
         val results = distinctResolvers.map { resolver ->
             async(Dispatchers.IO) {

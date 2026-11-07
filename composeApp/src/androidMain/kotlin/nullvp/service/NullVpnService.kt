@@ -217,6 +217,16 @@ class NullVpnService : VpnService() {
                 } else if (profile.protocolType == ProtocolType.MASTER_DNS) {
                     localRelayPort = (20000..50000).random()
                     val raw = profile.protocolRawConfig
+                    val defaultResolvers = listOf(
+                        "1.1.1.1", "1.0.0.1",
+                        "8.8.8.8", "8.8.4.4",
+                        "9.9.9.9", "149.112.112.112",
+                        "208.67.222.222", "208.67.220.220",
+                        "208.67.222.123", "208.67.220.123",
+                        "4.2.2.1", "4.2.2.2", "4.2.2.3", "4.2.2.4",
+                        "84.200.69.80", "84.200.70.40",
+                        "64.6.64.6", "64.6.65.6"
+                    )
                     val updatedJson = runCatching {
                         val parsed = Json.parseToJsonElement(raw).jsonObject.toMutableMap()
                         parsed["LISTEN_PORT"] = JsonPrimitive(localRelayPort)
@@ -232,27 +242,25 @@ class NullVpnService : VpnService() {
                         parsed["AUTO_DISABLE_TIMEOUT_SERVERS"] = JsonPrimitive(false)
                         parsed["AUTO_REMOVE_LOW_MTU_SERVERS"] = JsonPrimitive(false)
                         parsed["PING_AGGRESSIVE_INTERVAL_SECONDS"] = JsonPrimitive(0.035)
-                        parsed["MTU_TEST_RETRIES"] = JsonPrimitive(4)
+                        parsed["MTU_TEST_RETRIES"] = JsonPrimitive(1)
+                        parsed["MTU_TEST_TIMEOUT"] = JsonPrimitive(1.2)
+                        parsed["MTU_TEST_PARALLELISM"] = JsonPrimitive(20)
                         parsed["LOG_LEVEL"] = JsonPrimitive("WARN")
+
+                        val parsedResolvers = runCatching {
+                            parsed["RESOLVERS"]?.jsonArray?.mapNotNull { it.jsonPrimitive.contentOrNull }
+                        }.getOrNull() ?: emptyList()
+                        val cleanResolvers = (parsedResolvers.filter { !it.contains("77.88.8.") } + defaultResolvers).distinct()
+                        parsed["RESOLVERS"] = JsonArray(cleanResolvers.map { JsonPrimitive(it) })
+
                         JsonObject(parsed).toString()
                     }.getOrDefault(raw)
 
                     val b64 = Base64.encodeToString(updatedJson.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
                     val filesDir = applicationContext.filesDir.absolutePath
                     val resolversFile = File(applicationContext.filesDir, "client_resolvers.txt")
-                    val defaultResolvers = listOf(
-                        "1.1.1.1", "1.0.0.1",
-                        "8.8.8.8", "8.8.4.4",
-                        "9.9.9.9", "149.112.112.112",
-                        "77.88.8.8", "77.88.8.1",
-                        "208.67.222.222", "208.67.220.220",
-                        "208.67.222.123", "208.67.220.123",
-                        "4.2.2.1", "4.2.2.2", "4.2.2.3", "4.2.2.4",
-                        "84.200.69.80", "84.200.70.40",
-                        "64.6.64.6", "64.6.65.6"
-                    )
                     runCatching {
-                        val existing = if (resolversFile.exists()) resolversFile.readLines().map { it.trim() }.filter { it.isNotEmpty() } else emptyList()
+                        val existing = if (resolversFile.exists()) resolversFile.readLines().map { it.trim() }.filter { it.isNotEmpty() && !it.contains("77.88.8.") } else emptyList()
                         val merged = (existing + defaultResolvers).distinct()
                         resolversFile.writeText(merged.joinToString("\n") + "\n")
                     }
@@ -264,7 +272,7 @@ class NullVpnService : VpnService() {
                     // Wait until MasterDnsVPN finishes MTU probing and session initialization
                     AndroidCoreBridge.addLog("[MDNS] Ожидание MTU-теста и инициализации сессии...")
                     var mdnsReady = false
-                    for (attempt in 0 until 85) {
+                    for (attempt in 0 until 180) {
                         if (!isActive || isStopping.get() || !Libv2ray.isMdnsClientRunning()) break
                         val sessionReady = runCatching { Libv2ray.isMdnsSessionReady() }.getOrDefault(false)
                         if (sessionReady) {
@@ -273,7 +281,7 @@ class NullVpnService : VpnService() {
                             mdnsReady = true
                             break
                         }
-                        delay(180)
+                        delay(200)
                     }
                     if (!mdnsReady && !isStopping.get()) {
                         error("DNS-туннель не смог пройти тест MTU (сервер не ответил)")

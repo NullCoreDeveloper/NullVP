@@ -137,9 +137,20 @@ class DesktopCoreEngine : CoreEngine {
                     }
 
                     val driverConfigFile = File(DRIVER_CONFIG_PATH)
+                    val defaultResolvers = listOf(
+                        "1.1.1.1", "1.0.0.1",
+                        "8.8.8.8", "8.8.4.4",
+                        "9.9.9.9", "149.112.112.112",
+                        "208.67.222.222", "208.67.220.220",
+                        "208.67.222.123", "208.67.220.123",
+                        "4.2.2.1", "4.2.2.2", "4.2.2.3", "4.2.2.4",
+                        "84.200.69.80", "84.200.70.40",
+                        "64.6.64.6", "64.6.65.6"
+                    )
                     val rawConfig = if (profile.protocolType == ProtocolType.MASTER_DNS) {
                         runCatching {
                             val parsed = Json.parseToJsonElement(profile.protocolRawConfig).jsonObject.toMutableMap()
+                            parsed["LISTEN_PORT"] = JsonPrimitive(localRelayPort)
                             parsed["FECDataShards"] = JsonPrimitive(0)
                             parsed["FECParityShards"] = JsonPrimitive(0)
                             parsed["FEC_DATA_SHARDS"] = JsonPrimitive(0)
@@ -151,8 +162,17 @@ class DesktopCoreEngine : CoreEngine {
                             parsed["AUTO_DISABLE_TIMEOUT_SERVERS"] = JsonPrimitive(false)
                             parsed["AUTO_REMOVE_LOW_MTU_SERVERS"] = JsonPrimitive(false)
                             parsed["PING_AGGRESSIVE_INTERVAL_SECONDS"] = JsonPrimitive(0.035)
-                            parsed["MTU_TEST_RETRIES"] = JsonPrimitive(4)
+                            parsed["MTU_TEST_RETRIES"] = JsonPrimitive(1)
+                            parsed["MTU_TEST_TIMEOUT"] = JsonPrimitive(1.2)
+                            parsed["MTU_TEST_PARALLELISM"] = JsonPrimitive(20)
                             parsed["LOG_LEVEL"] = JsonPrimitive("WARN")
+
+                            val parsedResolvers = runCatching {
+                                parsed["RESOLVERS"]?.jsonArray?.mapNotNull { it.jsonPrimitive.contentOrNull }
+                            }.getOrNull() ?: emptyList()
+                            val cleanResolvers = (parsedResolvers.filter { !it.contains("77.88.8.") } + defaultResolvers).distinct()
+                            parsed["RESOLVERS"] = JsonArray(cleanResolvers.map { JsonPrimitive(it) })
+
                             JsonObject(parsed).toString()
                         }.getOrDefault(profile.protocolRawConfig)
                     } else {
@@ -199,7 +219,7 @@ class DesktopCoreEngine : CoreEngine {
                     if (profile.protocolType == ProtocolType.MASTER_DNS) {
                         appendLog("[MDNS] Ожидание MTU-теста и запуска локального порта :$localRelayPort...")
                         var mdnsReady = false
-                        for (attempt in 0 until 80) {
+                        for (attempt in 0 until 180) {
                             if (!isActive || !cProc.isAlive) break
                             val canConnect = runCatching {
                                 java.net.Socket().use { s ->
