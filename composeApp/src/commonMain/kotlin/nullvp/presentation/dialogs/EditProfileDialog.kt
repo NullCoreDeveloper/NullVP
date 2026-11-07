@@ -770,6 +770,10 @@ fun EditProfileDialog(
                                         if (wgMtu.isNotBlank()) mutableMap["mtu"] = JsonPrimitive(wgMtu.toIntOrNull() ?: 1280)
                                         if (obfProfile.isNotBlank()) mutableMap["obfProfile"] = JsonPrimitive(obfProfile.trim())
                                         if (obfKey.isNotBlank()) mutableMap["obfKey"] = JsonPrimitive(obfKey.trim())
+                                    } else if (profile.protocolType == ProtocolType.MASTER_DNS) {
+                                        val domainsList = mdnsDomains.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+                                        mutableMap["DOMAINS"] = kotlinx.serialization.json.JsonArray(domainsList.map { JsonPrimitive(it) })
+                                        if (mdnsKey.isNotBlank()) mutableMap["ENCRYPTION_KEY"] = JsonPrimitive(mdnsKey.trim())
                                     }
 
                                     JsonObject(mutableMap).toString()

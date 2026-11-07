@@ -50,6 +50,7 @@ func main() {
 				if err := json.Unmarshal(content, &cfgMap); err == nil {
 					if *localPort > 0 {
 						cfgMap["localPort"] = *localPort
+						cfgMap["LISTEN_PORT"] = *localPort
 					}
 					content, _ = json.Marshal(cfgMap)
 				}

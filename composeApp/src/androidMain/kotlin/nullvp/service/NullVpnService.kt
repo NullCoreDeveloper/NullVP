@@ -218,13 +218,25 @@ class NullVpnService : VpnService() {
                     val updatedJson = runCatching {
                         val parsed = Json.parseToJsonElement(raw).jsonObject.toMutableMap()
                         parsed["LISTEN_PORT"] = JsonPrimitive(localRelayPort)
+                        // Disable broken Soft ARQ FEC 10+3 fragmentation so 1 packet = 1 DNS query with instant ACKs
+                        parsed["FECDataShards"] = JsonPrimitive(0)
+                        parsed["FECParityShards"] = JsonPrimitive(0)
                         JsonObject(parsed).toString()
                     }.getOrDefault(raw)
 
                     val b64 = Base64.encodeToString(updatedJson.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
                     val filesDir = applicationContext.filesDir.absolutePath
+                    val resolversFile = File(applicationContext.filesDir, "client_resolvers.txt")
+                    if (!resolversFile.exists() || resolversFile.length() == 0L) {
+                        runCatching {
+                            resolversFile.writeText("1.1.1.1\n1.0.0.1\n8.8.8.8\n8.8.4.4\n9.9.9.9\n149.112.112.112\n77.88.8.8\n77.88.8.1\n")
+                        }
+                    }
                     AndroidCoreBridge.addLog("[MDNS] Starting internal MDNS engine on :$localRelayPort")
                     Libv2ray.startMdnsClient(b64, "", filesDir)
+                    if (!Libv2ray.isMdnsClientRunning()) {
+                        error("MasterDnsVPN client failed to start")
+                    }
                 }
 
                 // 4. Build Real Xray configuration

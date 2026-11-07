@@ -576,7 +576,7 @@ object RealXrayConfigBuilder {
             }
 
             // MUX Settings
-            if (settings.muxEnabled && profile.protocolType != ProtocolType.HYSTERIA2) {
+            if (settings.muxEnabled && profile.protocolType != ProtocolType.HYSTERIA2 && profile.protocolType != ProtocolType.MASTER_DNS && profile.protocolType != ProtocolType.VK_TURN) {
                 putJsonObject("mux") {
                     put("enabled", true)
                     put("concurrency", settings.muxConcurrency)
