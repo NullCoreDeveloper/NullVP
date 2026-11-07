@@ -30,3 +30,4 @@ keystore.properties
 /core-bridge/*.dll
 /core-bridge/*.dylib
 
+composeApp/libs/*-sources.jar
