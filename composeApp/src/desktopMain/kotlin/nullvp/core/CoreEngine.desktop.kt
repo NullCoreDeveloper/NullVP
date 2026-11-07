@@ -146,6 +146,13 @@ class DesktopCoreEngine : CoreEngine {
                             parsed["FEC_PARITY_SHARDS"] = JsonPrimitive(0)
                             parsed["BASE_ENCODE_DATA"] = JsonPrimitive(true)
                             parsed["DATA_ENCRYPTION_METHOD"] = JsonPrimitive(1)
+                            parsed["PACKET_DUPLICATION_COUNT"] = JsonPrimitive(1)
+                            parsed["SETUP_PACKET_DUPLICATION_COUNT"] = JsonPrimitive(2)
+                            parsed["AUTO_DISABLE_TIMEOUT_SERVERS"] = JsonPrimitive(false)
+                            parsed["AUTO_REMOVE_LOW_MTU_SERVERS"] = JsonPrimitive(false)
+                            parsed["PING_AGGRESSIVE_INTERVAL_SECONDS"] = JsonPrimitive(0.035)
+                            parsed["MTU_TEST_RETRIES"] = JsonPrimitive(4)
+                            parsed["LOG_LEVEL"] = JsonPrimitive("WARN")
                             JsonObject(parsed).toString()
                         }.getOrDefault(profile.protocolRawConfig)
                     } else {

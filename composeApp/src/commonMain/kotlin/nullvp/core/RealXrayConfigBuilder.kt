@@ -141,6 +141,22 @@ object RealXrayConfigBuilder {
                         put("outboundTag", "api")
                     }
 
+                    // For DNS Tunnel (MASTER_DNS), block QUIC (UDP/443) and DoT (TCP+UDP/853)
+                    // so apps immediately fall back to TCP and standard DNS without flooding the tunnel.
+                    if (profile.protocolType == ProtocolType.MASTER_DNS) {
+                        addJsonObject {
+                            put("type", "field")
+                            put("outboundTag", "block")
+                            put("network", "udp")
+                            put("port", "443")
+                        }
+                        addJsonObject {
+                            put("type", "field")
+                            put("outboundTag", "block")
+                            put("port", "853")
+                        }
+                    }
+
                     // Block Ads
                     if (settings.blockAds) {
                         addJsonObject {

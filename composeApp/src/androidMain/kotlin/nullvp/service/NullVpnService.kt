@@ -227,38 +227,53 @@ class NullVpnService : VpnService() {
                         parsed["FEC_PARITY_SHARDS"] = JsonPrimitive(0)
                         parsed["BASE_ENCODE_DATA"] = JsonPrimitive(true)
                         parsed["DATA_ENCRYPTION_METHOD"] = JsonPrimitive(1)
+                        parsed["PACKET_DUPLICATION_COUNT"] = JsonPrimitive(1)
+                        parsed["SETUP_PACKET_DUPLICATION_COUNT"] = JsonPrimitive(2)
+                        parsed["AUTO_DISABLE_TIMEOUT_SERVERS"] = JsonPrimitive(false)
+                        parsed["AUTO_REMOVE_LOW_MTU_SERVERS"] = JsonPrimitive(false)
+                        parsed["PING_AGGRESSIVE_INTERVAL_SECONDS"] = JsonPrimitive(0.035)
+                        parsed["MTU_TEST_RETRIES"] = JsonPrimitive(4)
+                        parsed["LOG_LEVEL"] = JsonPrimitive("WARN")
                         JsonObject(parsed).toString()
                     }.getOrDefault(raw)
 
                     val b64 = Base64.encodeToString(updatedJson.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
                     val filesDir = applicationContext.filesDir.absolutePath
                     val resolversFile = File(applicationContext.filesDir, "client_resolvers.txt")
-                    if (!resolversFile.exists() || resolversFile.length() == 0L) {
-                        runCatching {
-                            resolversFile.writeText("1.1.1.1\n1.0.0.1\n8.8.8.8\n8.8.4.4\n9.9.9.9\n149.112.112.112\n77.88.8.8\n77.88.8.1\n")
-                        }
+                    val defaultResolvers = listOf(
+                        "1.1.1.1", "1.0.0.1",
+                        "8.8.8.8", "8.8.4.4",
+                        "9.9.9.9", "149.112.112.112",
+                        "77.88.8.8", "77.88.8.1",
+                        "208.67.222.222", "208.67.220.220",
+                        "208.67.222.123", "208.67.220.123",
+                        "4.2.2.1", "4.2.2.2", "4.2.2.3", "4.2.2.4",
+                        "84.200.69.80", "84.200.70.40",
+                        "64.6.64.6", "64.6.65.6"
+                    )
+                    runCatching {
+                        val existing = if (resolversFile.exists()) resolversFile.readLines().map { it.trim() }.filter { it.isNotEmpty() } else emptyList()
+                        val merged = (existing + defaultResolvers).distinct()
+                        resolversFile.writeText(merged.joinToString("\n") + "\n")
                     }
                     AndroidCoreBridge.addLog("[MDNS] Starting internal MDNS engine on :$localRelayPort")
                     Libv2ray.startMdnsClient(b64, "", filesDir)
                     if (!Libv2ray.isMdnsClientRunning()) {
                         error("MasterDnsVPN client failed to start")
                     }
-                    // Wait until MasterDnsVPN finishes MTU probing and opens the local SOCKS5 port
+                    // Wait until MasterDnsVPN finishes MTU probing and session initialization
                     AndroidCoreBridge.addLog("[MDNS] Ожидание MTU-теста и инициализации сессии...")
                     var mdnsReady = false
-                    for (attempt in 0 until 80) {
+                    for (attempt in 0 until 85) {
                         if (!isActive || isStopping.get() || !Libv2ray.isMdnsClientRunning()) break
-                        val canConnect = runCatching {
-                            java.net.Socket().use { s ->
-                                s.connect(java.net.InetSocketAddress("127.0.0.1", localRelayPort), 150)
-                                true
-                            }
-                        }.getOrDefault(false)
-                        if (canConnect) {
+                        val sessionReady = runCatching { Libv2ray.isMdnsSessionReady() }.getOrDefault(false)
+                        if (sessionReady) {
+                            // Wait briefly for StartAsyncRuntime to bind the TCP listener after sessionReady=true
+                            delay(80)
                             mdnsReady = true
                             break
                         }
-                        delay(200)
+                        delay(180)
                     }
                     if (!mdnsReady && !isStopping.get()) {
                         error("DNS-туннель не смог пройти тест MTU (сервер не ответил)")
