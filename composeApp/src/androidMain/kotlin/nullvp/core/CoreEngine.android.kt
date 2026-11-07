@@ -26,17 +26,23 @@ class AndroidCoreEngine(private var appContext: Context? = null) : CoreEngine {
     override fun start(profile: Profile): Result<Unit> {
         val ctx = appContext ?: return Result.failure(IllegalStateException("Context not initialized"))
 
-        val prepareIntent = VpnService.prepare(ctx)
-        if (prepareIntent != null) {
-            MainActivity.instance?.let { act ->
-                MainActivity.pendingProfile = profile
-                MainActivity.vpnPermissionLauncher?.launch(prepareIntent)
-                return Result.failure(SecurityException("VPN permission consent requested"))
-            } ?: return Result.failure(SecurityException("VPN consent needed"))
+        val settings = AppStateStore.settings.value
+        val isTunMode = settings.operationMode != nullvp.domain.model.OperationMode.PROXY_ONLY
+
+        // Only request Android VPN permission if we are actually starting a TUN tunnel
+        if (isTunMode) {
+            val prepareIntent = VpnService.prepare(ctx)
+            if (prepareIntent != null) {
+                MainActivity.instance?.let { act ->
+                    MainActivity.pendingProfile = profile
+                    MainActivity.vpnPermissionLauncher?.launch(prepareIntent)
+                    return Result.failure(SecurityException("VPN permission consent requested"))
+                } ?: return Result.failure(SecurityException("VPN consent needed"))
+            }
         }
 
         AndroidCoreBridge.activeProfile = profile
-        AndroidCoreBridge.appSettings = AppStateStore.settings.value
+        AndroidCoreBridge.appSettings = settings
         AndroidCoreBridge.setConnecting(true)
 
         val serviceIntent = Intent(ctx, NullVpnService::class.java).apply {

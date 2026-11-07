@@ -54,7 +54,7 @@ data class AppSettings(
     val bypassLan: Boolean = true,
     val bypassRu: Boolean = true,
     val dynamicRuAppScannerEnabled: Boolean = true, // Dynamically scan & bypass RU apps (4PDA forced through VPN)
-    val perAppProxyEnabled: Boolean = false,
+    val perAppProxyEnabled: Boolean = true,
     val perAppBypassMode: Boolean = true,
     val perAppSelectedPackages: List<String> = emptyList(),
 

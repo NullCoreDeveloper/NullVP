@@ -38,15 +38,18 @@ import nullvp.domain.protocol.ProtocolRegistry
 import nullvp.i18n.Localization
 import nullvp.platform.AppBackHandler
 import nullvp.platform.AppExitHelper
+import nullvp.platform.AppListHelper
 import nullvp.platform.ClipboardHelper
 import nullvp.platform.ConnectionInfo
 import nullvp.platform.ConnectionInfoHelper
 import nullvp.platform.PingHelper
 import nullvp.platform.PrivilegeHelper
 import nullvp.platform.UrlHelper
+import nullvp.platform.rememberQrScanner
 import nullvp.presentation.components.ConnectButton
 import nullvp.presentation.components.ConnectState
 import nullvp.presentation.components.NullVpTextField
+import nullvp.presentation.components.QrCodeScannerIcon
 import nullvp.presentation.components.ServerCard
 import nullvp.presentation.components.SpeedRow
 import nullvp.presentation.components.SubscriptionCard
@@ -136,6 +139,72 @@ fun App() {
 
     val subscriptionManager = remember {
         SubscriptionManager(HttpClient())
+    }
+
+    var showQrSourceDialog by remember { mutableStateOf(false) }
+
+    val handleImportContent: (String) -> Unit = remember(isRunning, settings.httpPort) {
+        { rawText: String ->
+            val text = rawText.trim()
+            val activeHttpPort = if (isRunning) settings.httpPort else null
+            if (text.startsWith("http://") || text.startsWith("https://")) {
+                isSubLoading = true
+                scope.launch {
+                    subscriptionManager.fetchSubscription(text, null, proxyPort = activeHttpPort)
+                        .onSuccess { (sub, nodes) ->
+                            isSubLoading = false
+                            AppStateStore.addSubscription(sub, nodes)
+                            AppStateStore.addLog(LogLevel.INFO, "Import", "Подписка '${sub.name}' успешно импортирована (${nodes.size} серверов)")
+                        }.onFailure { err ->
+                            isSubLoading = false
+                            subImportError = "Fetch error: ${err.message}"
+                            AppStateStore.addLog(LogLevel.ERROR, "Import", "Ошибка загрузки: ${err.message}")
+                        }
+                }
+            } else {
+                val lines = text.split("\n", "\r\n")
+                var addedCount = 0
+                for (l in lines) {
+                    val line = l.trim()
+                    if (line.isBlank() || line.startsWith("#")) continue
+                    val p = ProtocolRegistry.parse(line)
+                    if (p != null) {
+                        AppStateStore.addProfile(p)
+                        addedCount++
+                    }
+                }
+                if (addedCount == 0) {
+                    val single = ProtocolRegistry.parse(text)
+                    if (single != null) {
+                        AppStateStore.addProfile(single)
+                        addedCount++
+                    }
+                }
+                if (addedCount > 0) {
+                    AppStateStore.addLog(LogLevel.INFO, "Import", "Импортировано серверов: $addedCount")
+                } else {
+                    subImportError = if (settings.language.code == "ru") "В QR-коде не найдено поддерживаемых серверов или ссылок" else "No valid servers found in QR code"
+                }
+            }
+        }
+    }
+
+    val qrScanner = rememberQrScanner(
+        onResult = { text ->
+            handleImportContent(text)
+        },
+        onError = { err ->
+            subImportError = err
+            AppStateStore.addLog(LogLevel.ERROR, "QR", err)
+        }
+    )
+
+    val onQrClick = {
+        if (AppListHelper.isAndroid()) {
+            showQrSourceDialog = true
+        } else {
+            qrScanner.launchGallery()
+        }
     }
 
     val activeProfile = profiles.find { it.id == selectedProfileId } ?: profiles.firstOrNull()
@@ -588,37 +657,7 @@ fun App() {
                                                         subImportError = if (settings.language.code == "ru") "Буфер обмена пуст" else "Clipboard is empty"
                                                         return@OutlinedButton
                                                     }
-                                                    if (clip.startsWith("http://") || clip.startsWith("https://")) {
-                                                        isSubLoading = true
-                                                        scope.launch {
-                                                            subscriptionManager.fetchSubscription(clip, null)
-                                                                .onSuccess { (sub, nodes) ->
-                                                                    isSubLoading = false
-                                                                    AppStateStore.addSubscription(sub, nodes)
-                                                                }.onFailure { err ->
-                                                                    isSubLoading = false
-                                                                    subImportError = "Fetch error: ${err.message}"
-                                                                }
-                                                        }
-                                                    } else {
-                                                        val lines = clip.split("\n", "\r\n")
-                                                        var addedCount = 0
-                                                        for (l in lines) {
-                                                            val line = l.trim()
-                                                            if (line.isBlank() || line.startsWith("#")) continue
-                                                            val p = ProtocolRegistry.parse(line)
-                                                            if (p != null) {
-                                                                AppStateStore.addProfile(p)
-                                                                addedCount++
-                                                            }
-                                                        }
-                                                        if (addedCount == 0) {
-                                                            val single = ProtocolRegistry.parse(clip)
-                                                            if (single != null) {
-                                                                AppStateStore.addProfile(single)
-                                                            }
-                                                        }
-                                                    }
+                                                    handleImportContent(clip)
                                                 },
                                                 colors = ButtonDefaults.outlinedButtonColors(contentColor = NeonCyan),
                                                 border = BorderStroke(1.dp, NeonCyan.copy(alpha = 0.6f)),
@@ -629,6 +668,20 @@ fun App() {
                                                 if (isWideScreen) {
                                                     Spacer(Modifier.width(4.dp))
                                                     Text(if (settings.language.code == "ru") "Из буфера" else "From Clipboard", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                                }
+                                            }
+
+                                            OutlinedButton(
+                                                onClick = onQrClick,
+                                                colors = ButtonDefaults.outlinedButtonColors(contentColor = NeonCyan),
+                                                border = BorderStroke(1.dp, NeonCyan.copy(alpha = 0.6f)),
+                                                contentPadding = PaddingValues(horizontal = if (isWideScreen) 10.dp else 8.dp, vertical = 6.dp),
+                                                shape = RoundedCornerShape(8.dp)
+                                            ) {
+                                                Icon(QrCodeScannerIcon, contentDescription = "QR-код", modifier = Modifier.size(16.dp))
+                                                if (isWideScreen) {
+                                                    Spacer(Modifier.width(4.dp))
+                                                    Text("QR-код", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                                 }
                                             }
 
@@ -860,44 +913,61 @@ fun App() {
 
                                     Spacer(modifier = Modifier.height(12.dp))
 
-                                    Button(
-                                        onClick = {
-                                            val input = newSubUrl.trim()
-                                            if (input.startsWith("http://") || input.startsWith("https://")) {
-                                                isSubLoading = true
-                                                scope.launch {
-                                                    val res = subscriptionManager.fetchSubscription(input, newSubName.ifBlank { null })
-                                                    isSubLoading = false
-                                                    res.onSuccess { (sub, nodes) ->
-                                                        AppStateStore.addSubscription(sub, nodes)
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        Button(
+                                            onClick = {
+                                                val input = newSubUrl.trim()
+                                                val activeHttpPort = if (isRunning) settings.httpPort else null
+                                                if (input.startsWith("http://") || input.startsWith("https://")) {
+                                                    isSubLoading = true
+                                                    scope.launch {
+                                                        val res = subscriptionManager.fetchSubscription(input, newSubName.ifBlank { null }, proxyPort = activeHttpPort)
+                                                        isSubLoading = false
+                                                        res.onSuccess { (sub, nodes) ->
+                                                            AppStateStore.addSubscription(sub, nodes)
+                                                            newSubUrl = ""
+                                                            newSubName = ""
+                                                        }.onFailure { err ->
+                                                            subImportError = "Fetch error: ${err.message}"
+                                                        }
+                                                    }
+                                                } else {
+                                                    val profile = ProtocolRegistry.parse(input)
+                                                    if (profile != null) {
+                                                        val finalProfile = if (newSubName.isNotBlank()) profile.copy(name = newSubName.trim()) else profile
+                                                        AppStateStore.addProfile(finalProfile)
                                                         newSubUrl = ""
                                                         newSubName = ""
-                                                    }.onFailure { err ->
-                                                        subImportError = "Fetch error: ${err.message}"
+                                                        currentScreen = Screen.SERVERS
+                                                    } else {
+                                                        subImportError = "Unsupported or invalid link format"
                                                     }
                                                 }
-                                            } else {
-                                                val profile = ProtocolRegistry.parse(input)
-                                                if (profile != null) {
-                                                    val finalProfile = if (newSubName.isNotBlank()) profile.copy(name = newSubName.trim()) else profile
-                                                    AppStateStore.addProfile(finalProfile)
-                                                    newSubUrl = ""
-                                                    newSubName = ""
-                                                    currentScreen = Screen.SERVERS
-                                                } else {
-                                                    subImportError = "Unsupported or invalid link format"
-                                                }
-                                            }
-                                        },
-                                        enabled = !isSubLoading && newSubUrl.isNotBlank(),
-                                        modifier = Modifier.fillMaxWidth(),
-                                        shape = RoundedCornerShape(10.dp),
-                                        colors = ButtonDefaults.buttonColors(containerColor = NeonCyan, contentColor = Color.Black)
-                                    ) {
-                                        Text(
-                                            if (isSubLoading) "Importing..." else strings.addSubscription,
-                                            fontWeight = FontWeight.Bold
-                                        )
+                                            },
+                                            enabled = !isSubLoading && newSubUrl.isNotBlank(),
+                                            modifier = Modifier.weight(1f),
+                                            shape = RoundedCornerShape(10.dp),
+                                            colors = ButtonDefaults.buttonColors(containerColor = NeonCyan, contentColor = Color.Black)
+                                        ) {
+                                            Text(
+                                                if (isSubLoading) "Importing..." else strings.addSubscription,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+
+                                        OutlinedButton(
+                                            onClick = onQrClick,
+                                            colors = ButtonDefaults.outlinedButtonColors(contentColor = NeonCyan),
+                                            border = BorderStroke(1.dp, NeonCyan.copy(alpha = 0.6f)),
+                                            shape = RoundedCornerShape(10.dp)
+                                        ) {
+                                            Icon(QrCodeScannerIcon, contentDescription = "QR-код", modifier = Modifier.size(18.dp))
+                                            Spacer(Modifier.width(6.dp))
+                                            Text("QR-код", fontWeight = FontWeight.Bold)
+                                        }
                                     }
 
                                     Spacer(modifier = Modifier.height(20.dp))
@@ -920,7 +990,8 @@ fun App() {
                                                 subscription = sub,
                                                 onRefresh = {
                                                     scope.launch {
-                                                        subscriptionManager.fetchSubscription(sub.url, sub.name)
+                                                        val activeHttpPort = if (isRunning) settings.httpPort else null
+                                                        subscriptionManager.fetchSubscription(sub.url, sub.name, proxyPort = activeHttpPort)
                                                             .onSuccess { (updatedSub, nodes) ->
                                                                 AppStateStore.addSubscription(updatedSub, nodes)
                                                             }
@@ -949,6 +1020,105 @@ fun App() {
                     }
                 }
             }
+        }
+
+        // QR Code Source Choice Dialog (Android Camera vs Gallery)
+        if (showQrSourceDialog) {
+            AlertDialog(
+                onDismissRequest = { showQrSourceDialog = false },
+                containerColor = DarkSurface,
+                title = {
+                    Text(
+                        text = if (settings.language.code == "ru") "Импорт по QR-коду" else "Import via QR Code",
+                        color = OnDarkSurface,
+                        fontWeight = FontWeight.Bold
+                    )
+                },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text(
+                            text = if (settings.language.code == "ru")
+                                "Выберите способ сканирования QR-кода профиля или подписки:"
+                            else
+                                "Choose QR code import method:",
+                            color = OnDarkSurfaceVariant,
+                            fontSize = 13.sp
+                        )
+
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = DarkSurfaceVariant.copy(alpha = 0.5f),
+                            border = BorderStroke(1.dp, NeonCyan.copy(alpha = 0.4f)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    showQrSourceDialog = false
+                                    qrScanner.launchCamera()
+                                }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(14.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("📷", fontSize = 20.sp)
+                                Spacer(Modifier.width(12.dp))
+                                Column {
+                                    Text(
+                                        text = if (settings.language.code == "ru") "Камера устройства" else "Device Camera",
+                                        fontWeight = FontWeight.Bold,
+                                        color = OnDarkSurface,
+                                        fontSize = 14.sp
+                                    )
+                                    Text(
+                                        text = if (settings.language.code == "ru") "Навести камеру на QR-код" else "Scan QR code with camera",
+                                        color = OnDarkSurfaceVariant,
+                                        fontSize = 11.sp
+                                    )
+                                }
+                            }
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = DarkSurfaceVariant.copy(alpha = 0.5f),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    showQrSourceDialog = false
+                                    qrScanner.launchGallery()
+                                }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(14.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("🖼️", fontSize = 20.sp)
+                                Spacer(Modifier.width(12.dp))
+                                Column {
+                                    Text(
+                                        text = if (settings.language.code == "ru") "Галерея / Скриншот" else "Gallery / Screenshot",
+                                        fontWeight = FontWeight.Bold,
+                                        color = OnDarkSurface,
+                                        fontSize = 14.sp
+                                    )
+                                    Text(
+                                        text = if (settings.language.code == "ru") "Выбрать изображение с QR-кодом" else "Choose saved image with QR code",
+                                        color = OnDarkSurfaceVariant,
+                                        fontSize = 11.sp
+                                    )
+                                }
+                            }
+                        }
+                    }
+                },
+                confirmButton = {},
+                dismissButton = {
+                    TextButton(onClick = { showQrSourceDialog = false }) {
+                        Text(strings.cancel, color = OnDarkSurfaceVariant)
+                    }
+                }
+            )
         }
 
         // Sudo Password Dialog for TUN Mode

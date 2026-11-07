@@ -140,46 +140,59 @@ class NullVpnService : VpnService() {
                 stopCoreAndTProxy()
 
                 isStopping.set(false)
-                val notification = createNotification("Подключен: ${profile.name}")
+                val settings = AndroidCoreBridge.appSettings
+                val isTunMode = settings.operationMode != nullvp.domain.model.OperationMode.PROXY_ONLY
+
+                val notifTitle = if (!isTunMode) {
+                    "NullVP • Прокси активен (:${settings.socksPort})"
+                } else {
+                    "NullVP • VPN активен"
+                }
+
+                val notification = createNotification(notifTitle, "Подключен: ${profile.name}")
                 if (Build.VERSION.SDK_INT >= 34) {
                     startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
                 } else {
                     startForeground(NOTIFICATION_ID, notification)
                 }
 
-                val settings = AndroidCoreBridge.appSettings
+                if (isTunMode) {
+                    // 1. Configure and establish Android VPN Tun Interface
+                    val builder = Builder()
+                        .setSession("NullVP")
+                        .setMtu(settings.tunMtu)
+                        .addAddress("10.10.10.2", 30)
+                        .addRoute("0.0.0.0", 0)
 
-                // 1. Configure and establish Android VPN Tun Interface
-                val builder = Builder()
-                    .setSession("NullVP")
-                    .setMtu(settings.tunMtu)
-                    .addAddress("10.10.10.2", 30)
-                    .addRoute("0.0.0.0", 0)
-
-                // Add DNS
-                val dns = if (settings.directDns.isNotBlank()) settings.directDns else "1.1.1.1"
-                if (dns.matches(Regex("\\d+\\.\\d+\\.\\d+\\.\\d+"))) {
-                    builder.addDnsServer(dns)
-                } else {
-                    builder.addDnsServer("1.1.1.1")
-                }
-                builder.addDnsServer("8.8.8.8")
-
-                // Configure IPv6 if enabled
-                if (settings.enableIpv6) {
-                    runCatching {
-                        builder.addAddress("fc00::2", 126)
-                        builder.addRoute("::", 0)
+                    // Add DNS
+                    val dns = if (settings.directDns.isNotBlank()) settings.directDns else "1.1.1.1"
+                    if (dns.matches(Regex("\\d+\\.\\d+\\.\\d+\\.\\d+"))) {
+                        builder.addDnsServer(dns)
+                    } else {
+                        builder.addDnsServer("1.1.1.1")
                     }
+                    builder.addDnsServer("8.8.8.8")
+
+                    // Configure IPv6 if enabled
+                    if (settings.enableIpv6) {
+                        runCatching {
+                            builder.addAddress("fc00::2", 126)
+                            builder.addRoute("::", 0)
+                        }
+                    }
+
+                    // 2. Split Tunneling & Dynamic App Scanner (v2whitelist logic)
+                    applySplitTunneling(builder)
+
+                    // Close previous interface if open
+                    vpnInterface?.close()
+                    val pfd = builder.establish() ?: error("Failed to establish VPN interface")
+                    vpnInterface = pfd
+                } else {
+                    vpnInterface?.close()
+                    vpnInterface = null
+                    AndroidCoreBridge.addLog("[MODE] Режим только прокси: системный TUN интерфейс НЕ создается")
                 }
-
-                // 2. Split Tunneling & Dynamic App Scanner (v2whitelist logic)
-                applySplitTunneling(builder)
-
-                // Close previous interface if open
-                vpnInterface?.close()
-                val pfd = builder.establish() ?: error("Failed to establish VPN interface")
-                vpnInterface = pfd
 
                 // 3. Handle Special Drivers (VK_TURN / MASTER_DNS)
                 var localRelayPort = 10815
@@ -218,15 +231,20 @@ class NullVpnService : VpnService() {
                 val configContent = RealXrayConfigBuilder.buildJson(profile, settings, localRelayPort)
                 AndroidCoreBridge.addLog("[XRAY] Config generated (${configContent.length} chars)")
 
-                // 5. Start hev-socks5-tunnel JNI
-                tproxyService = TProxyService(applicationContext, pfd)
-                tproxyService?.startTun2Socks(
-                    socksPort = settings.socksPort,
-                    socksUsername = if (settings.proxyAuthEnabled) settings.proxyUsername else null,
-                    socksPassword = if (settings.proxyAuthEnabled) settings.proxyPassword else null,
-                    mtu = settings.tunMtu
-                )
-                AndroidCoreBridge.addLog("[TPROXY] hev-socks5-tunnel started on port ${settings.socksPort}")
+                // 5. Start hev-socks5-tunnel JNI (only in TUN mode)
+                if (isTunMode) {
+                    val pfd = vpnInterface ?: error("Failed to acquire VPN interface for TUN mode")
+                    tproxyService = TProxyService(applicationContext, pfd)
+                    tproxyService?.startTun2Socks(
+                        socksPort = settings.socksPort,
+                        socksUsername = if (settings.proxyAuthEnabled) settings.proxyUsername else null,
+                        socksPassword = if (settings.proxyAuthEnabled) settings.proxyPassword else null,
+                        mtu = settings.tunMtu
+                    )
+                    AndroidCoreBridge.addLog("[TPROXY] hev-socks5-tunnel started on port ${settings.socksPort}")
+                } else {
+                    AndroidCoreBridge.addLog("[PROXY] Локальный прокси слушает 127.0.0.1:${settings.socksPort} (SOCKS5) и :${settings.httpPort} (HTTP)")
+                }
 
                 // 6. Start Core Controller
                 val callback = object : CoreCallbackHandler {
@@ -443,7 +461,7 @@ class NullVpnService : VpnService() {
         }
     }
 
-    private fun createNotification(text: String): Notification {
+    private fun createNotification(title: String, text: String): Notification {
         val openIntent = Intent(this, MainActivity::class.java)
         val openPendingIntent = PendingIntent.getActivity(
             this, 0, openIntent,
@@ -460,7 +478,7 @@ class NullVpnService : VpnService() {
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("NullVP • VPN активен")
+            .setContentTitle(title)
             .setContentText(text)
             .setSmallIcon(android.R.drawable.ic_lock_lock)
             .setContentIntent(openPendingIntent)

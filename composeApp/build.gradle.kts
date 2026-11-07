@@ -39,6 +39,7 @@ kotlin {
                 implementation(libs.ktor.client.core)
                 implementation(libs.ktor.client.content.negotiation)
                 implementation(libs.ktor.serialization.kotlinx.json)
+                implementation("com.google.zxing:core:3.5.3")
             }
         }
         
@@ -57,6 +58,7 @@ kotlin {
                 implementation(libs.kotlinx.coroutines.android)
                 implementation(libs.koin.android)
                 implementation(libs.ktor.client.okhttp)
+                implementation("com.journeyapps:zxing-android-embedded:4.3.0")
             }
         }
         
@@ -65,6 +67,7 @@ kotlin {
                 implementation(compose.desktop.currentOs)
                 implementation(libs.kotlinx.coroutines.swing)
                 implementation(libs.ktor.client.cio)
+                implementation("com.google.zxing:javase:3.5.3")
                 implementation("dev.nucleusframework:composenativetray:2.1.7")
                 implementation("org.slf4j:slf4j-nop:2.0.16")
             }

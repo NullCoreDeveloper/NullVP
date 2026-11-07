@@ -596,21 +596,26 @@ private fun RoutingCategorySection(
                                             color = MaterialTheme.colorScheme.onSurface,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis,
-                                            modifier = Modifier.weight(1f, fill = false)
+                                            modifier = Modifier.weight(1f)
                                         )
                                         Spacer(Modifier.width(8.dp))
                                         Surface(
-                                            shape = RoundedCornerShape(4.dp),
-                                            color = outboundColor.copy(alpha = 0.15f)
+                                            shape = RoundedCornerShape(6.dp),
+                                            color = outboundColor.copy(alpha = 0.15f),
+                                            modifier = Modifier.wrapContentWidth()
                                         ) {
                                             Text(
-                                                text = rule.outbound.uppercase(),
+                                                text = when (rule.outbound.lowercase()) {
+                                                    "direct" -> "DIRECT"
+                                                    "proxy" -> "PROXY"
+                                                    else -> "BLOCK"
+                                                },
                                                 color = outboundColor,
                                                 fontSize = 10.sp,
-                                                fontWeight = FontWeight.Bold,
+                                                fontWeight = FontWeight.ExtraBold,
                                                 maxLines = 1,
                                                 softWrap = false,
-                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
                                             )
                                         }
                                     }
