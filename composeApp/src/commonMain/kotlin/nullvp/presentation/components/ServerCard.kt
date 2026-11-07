@@ -85,6 +85,16 @@ fun ServerCard(
                         maxLines = 1,
                         overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                     )
+                    if (!profile.pingDetails.isNullOrBlank()) {
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = profile.pingDetails,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (profile.pingMs >= 0) NeonCyan else CyberRed,
+                            maxLines = 2,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                        )
+                    }
                 }
             }
 

@@ -9,14 +9,15 @@ RUNTIME_FILE="${HOME}/.local/lib/appimagetool/runtime-x86_64"
 DIST_DIR="$ROOT_DIR/dist"
 
 echo "=== 1. Сборка Go ядра nullvp-core ==="
-mkdir -p "$ROOT_DIR/core-bridge/bin"
+mkdir -p "$ROOT_DIR/core-bridge/bin" "$ROOT_DIR/bin"
 pushd "$ROOT_DIR/core-bridge" >/dev/null
 go build -trimpath -ldflags="-s -w" -o bin/nullvp-core ./cmd/main.go
+cp -f bin/nullvp-core "$ROOT_DIR/bin/nullvp-core"
 popd >/dev/null
 
-echo "=== 2. Сборка Compose Desktop Distributable ==="
+echo "=== 2. Сборка Compose Desktop Distributable и Android APK ==="
 pushd "$ROOT_DIR" >/dev/null
-./gradlew createDistributable
+./gradlew createDistributable assembleDebug
 popd >/dev/null
 
 echo "=== 3. Подготовка структуры AppDir ==="

@@ -405,7 +405,7 @@ fun App() {
                                     ConnectButton(
                                         state = connectState,
                                         onClick = {
-                                            if (isRunning) {
+                                            if (isRunning || isConnecting) {
                                                 coreEngine.stop()
                                             } else if (activeProfile != null) {
                                                 if (settings.operationMode == OperationMode.TUN && PrivilegeHelper.needsSudoForTun) {
@@ -467,10 +467,12 @@ fun App() {
                                                                 isPingingActive = true
                                                                 connectionInfoResult = null
                                                                 scope.launch {
-                                                                    val ping = PingHelper.measurePing(activeProfile.serverAddress, activeProfile.serverPort)
+                                                                    val smartRes = PingHelper.measureProfilePing(activeProfile)
+                                                                    val ping = smartRes.latencyMs
                                                                     val info = ConnectionInfoHelper.fetchServerInfo(activeProfile.serverAddress, if (ping >= 0) ping else 0L)
                                                                     val updated = activeProfile.copy(
                                                                         pingMs = ping,
+                                                                        pingDetails = smartRes.details,
                                                                         serverIp = info?.maskedIp,
                                                                         serverLocation = info?.let { "${it.country}${if (it.city.isNotBlank()) ", ${it.city}" else ""}" },
                                                                         serverFlag = info?.flag
@@ -497,6 +499,24 @@ fun App() {
                                                             Text(if (activeProfile.pingMs >= 0) "${activeProfile.pingMs} ms" else "Пинг", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                                         }
                                                     }
+                                                }
+                                            }
+
+                                            // Детали протокол-специфичной проверки (MDNS DNS серверы / VK TURN / 204-тест)
+                                            if (!activeProfile.pingDetails.isNullOrBlank()) {
+                                                Surface(
+                                                    shape = RoundedCornerShape(10.dp),
+                                                    color = (if (activeProfile.pingMs >= 0) NeonCyan else CyberRed).copy(alpha = 0.1f),
+                                                    border = BorderStroke(1.dp, (if (activeProfile.pingMs >= 0) NeonCyan else CyberRed).copy(alpha = 0.35f)),
+                                                    modifier = Modifier.fillMaxWidth()
+                                                ) {
+                                                    Text(
+                                                        text = activeProfile.pingDetails,
+                                                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                                                        fontSize = 12.sp,
+                                                        fontWeight = FontWeight.Medium,
+                                                        color = if (activeProfile.pingMs >= 0) NeonCyan else CyberRed
+                                                    )
                                                 }
                                             }
 
@@ -616,12 +636,14 @@ fun App() {
                                                     if (!isBatchPinging) {
                                                         isBatchPinging = true
                                                         scope.launch {
-                                                            profiles.forEach { p ->
+                                                            val jobs = profiles.map { p ->
                                                                 launch {
-                                                                    val ping = PingHelper.measurePing(p.serverAddress, p.serverPort)
+                                                                    val smartRes = PingHelper.measureProfilePing(p)
+                                                                    val ping = smartRes.latencyMs
                                                                     val info = ConnectionInfoHelper.fetchServerInfo(p.serverAddress, if (ping >= 0) ping else 0L)
                                                                     val updated = p.copy(
                                                                         pingMs = ping,
+                                                                        pingDetails = smartRes.details,
                                                                         serverIp = info?.maskedIp,
                                                                         serverLocation = info?.let { "${it.country}${if (it.city.isNotBlank()) ", ${it.city}" else ""}" },
                                                                         serverFlag = info?.flag
@@ -629,6 +651,7 @@ fun App() {
                                                                     AppStateStore.updateProfile(updated)
                                                                 }
                                                             }
+                                                            jobs.forEach { it.join() }
                                                             isBatchPinging = false
                                                         }
                                                     }

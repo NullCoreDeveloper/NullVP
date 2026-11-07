@@ -58,10 +58,12 @@ class AndroidCoreEngine(private var appContext: Context? = null) : CoreEngine {
 
     override fun stop(): Result<Unit> {
         val ctx = appContext ?: return Result.failure(IllegalStateException("Context not initialized"))
+        AndroidCoreBridge.setRunning(false)
+        AndroidCoreBridge.addLog("[STOP] Остановка VPN-туннеля...")
         val serviceIntent = Intent(ctx, NullVpnService::class.java).apply {
             action = NullVpnService.ACTION_STOP
         }
-        ctx.startService(serviceIntent)
+        runCatching { ctx.startService(serviceIntent) }
         return Result.success(Unit)
     }
 

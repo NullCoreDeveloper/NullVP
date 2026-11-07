@@ -39,6 +39,7 @@ class NullVpnService : VpnService() {
     private var tproxyService: TProxyService? = null
     private var coreController: CoreController? = null
     private var statsJob: Job? = null
+    private var startJob: Job? = null
 
     private val isStopping = AtomicBoolean(false)
     private var sleptMillis = 0L
@@ -134,7 +135,8 @@ class NullVpnService : VpnService() {
     }
 
     private fun startVpn(profile: Profile) {
-        scope.launch {
+        startJob?.cancel()
+        startJob = scope.launch {
             try {
                 // If core is already running, gracefully tear it down first to reload new rules/profile
                 stopCoreAndTProxy()
@@ -237,7 +239,30 @@ class NullVpnService : VpnService() {
                     if (!Libv2ray.isMdnsClientRunning()) {
                         error("MasterDnsVPN client failed to start")
                     }
+                    // Wait until MasterDnsVPN finishes MTU probing and opens the local SOCKS5 port
+                    AndroidCoreBridge.addLog("[MDNS] Ожидание MTU-теста и инициализации сессии...")
+                    var mdnsReady = false
+                    for (attempt in 0 until 80) {
+                        if (!isActive || isStopping.get() || !Libv2ray.isMdnsClientRunning()) break
+                        val canConnect = runCatching {
+                            java.net.Socket().use { s ->
+                                s.connect(java.net.InetSocketAddress("127.0.0.1", localRelayPort), 150)
+                                true
+                            }
+                        }.getOrDefault(false)
+                        if (canConnect) {
+                            mdnsReady = true
+                            break
+                        }
+                        delay(200)
+                    }
+                    if (!mdnsReady && !isStopping.get()) {
+                        error("DNS-туннель не смог пройти тест MTU (сервер не ответил)")
+                    }
+                    AndroidCoreBridge.addLog("[MDNS] Сессия установлена, локальный порт :$localRelayPort готов!")
                 }
+
+                if (!isActive || isStopping.get()) return@launch
 
                 // 4. Build Real Xray configuration
                 val configContent = RealXrayConfigBuilder.buildJson(profile, settings, localRelayPort)
@@ -288,6 +313,8 @@ class NullVpnService : VpnService() {
                 // 7. Start real-time traffic statistics poller
                 startStatsPoller(controller)
 
+            } catch (e: CancellationException) {
+                // Cancelled by stopVpn
             } catch (e: Exception) {
                 AndroidCoreBridge.setError("Failed to start VPN: ${e.message}")
                 stopVpn()
@@ -299,9 +326,6 @@ class NullVpnService : VpnService() {
         val settings = AndroidCoreBridge.appSettings
         val selfPackage = packageName
 
-        // Always disallow VPN's own package to prevent routing loops
-        builder.addDisallowedApplication(selfPackage)
-
         val pm = packageManager
         val installed = runCatching { pm.getInstalledPackages(0) }.getOrDefault(emptyList())
 
@@ -312,8 +336,13 @@ class NullVpnService : VpnService() {
 
         if (isPerApp && !isBypassMode) {
             // PROXY (WHITELIST) MODE: only selected apps go through VPN.
+            // Note: Do NOT call addDisallowedApplication in this branch because Android VpnService.Builder
+            // forbids mixing addAllowedApplication and addDisallowedApplication!
+            // Since selfPackage is not added to allowed applications, NullVP is automatically bypassed.
             selectedPackages.forEach { pkg ->
-                runCatching { builder.addAllowedApplication(pkg) }
+                if (pkg != selfPackage) {
+                    runCatching { builder.addAllowedApplication(pkg) }
+                }
             }
             // CRITICAL REQUIREMENT: Force 4PDA through VPN even in proxy mode if present!
             installed.forEach { pkg ->
@@ -322,9 +351,11 @@ class NullVpnService : VpnService() {
                     runCatching { builder.addAllowedApplication(pkg.packageName) }
                 }
             }
-            // When in Proxy Mode, Android automatically bypasses all other non-allowed apps.
             return
         }
+
+        // Always disallow VPN's own package in normal/bypass mode to prevent routing loops
+        runCatching { builder.addDisallowedApplication(selfPackage) }
 
         // BYPASS MODE:
         if (isPerApp && isBypassMode) {
@@ -412,15 +443,17 @@ class NullVpnService : VpnService() {
         statsJob?.cancel()
         statsJob = null
 
-        try {
-            tproxyService?.stopTun2Socks()
-        } catch (_: Exception) {}
+        val tp = tproxyService
         tproxyService = null
-
         try {
-            coreController?.stopLoop()
+            tp?.stopTun2Socks()
         } catch (_: Exception) {}
+
+        val cc = coreController
         coreController = null
+        try {
+            cc?.stopLoop()
+        } catch (_: Exception) {}
 
         runCatching {
             if (Libv2ray.isVkTurnClientRunning()) {
@@ -436,12 +469,21 @@ class NullVpnService : VpnService() {
 
     private fun stopVpn() {
         if (isStopping.compareAndSet(false, true)) {
-            stopCoreAndTProxy()
-            vpnInterface?.close()
-            vpnInterface = null
+            startJob?.cancel()
+            startJob = null
+            statsJob?.cancel()
+            statsJob = null
             AndroidCoreBridge.setRunning(false)
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelf()
+            runCatching { stopForeground(STOP_FOREGROUND_REMOVE) }
+
+            val pfd = vpnInterface
+            vpnInterface = null
+
+            Thread {
+                runCatching { stopCoreAndTProxy() }
+                runCatching { pfd?.close() }
+                runCatching { stopSelf() }
+            }.start()
         }
     }
 
@@ -453,10 +495,27 @@ class NullVpnService : VpnService() {
     override fun onDestroy() {
         super.onDestroy()
         runCatching { unregisterReceiver(screenOnReceiver) }
+        startJob?.cancel()
+        statsJob?.cancel()
         scope.cancel()
-        stopCoreAndTProxy()
-        vpnInterface?.close()
+        AndroidCoreBridge.setRunning(false)
+        val pfd = vpnInterface
         vpnInterface = null
+        val tp = tproxyService
+        tproxyService = null
+        val cc = coreController
+        coreController = null
+        Thread {
+            runCatching { tp?.stopTun2Socks() }
+            runCatching { cc?.stopLoop() }
+            runCatching {
+                if (Libv2ray.isVkTurnClientRunning()) Libv2ray.stopVkTurnClient()
+            }
+            runCatching {
+                if (Libv2ray.isMdnsClientRunning()) Libv2ray.stopMdnsClient()
+            }
+            runCatching { pfd?.close() }
+        }.start()
     }
 
     private fun createNotificationChannel() {

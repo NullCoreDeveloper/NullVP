@@ -41,6 +41,7 @@ class DesktopCoreEngine : CoreEngine {
     private var coreProcess: Process? = null
     private var companionProcess: Process? = null
     private var tunProcess: Process? = null
+    private var startJob: Job? = null
     private var statsJob: Job? = null
     private var logJob: Job? = null
     private var companionLogJob: Job? = null
@@ -91,7 +92,8 @@ class DesktopCoreEngine : CoreEngine {
         _isConnecting.value = true
         _connectionError.value = null
 
-        scope.launch(Dispatchers.IO) {
+        startJob?.cancel()
+        startJob = scope.launch(Dispatchers.IO) {
             try {
                 killExistingZombieProcesses()
 
@@ -171,8 +173,38 @@ class DesktopCoreEngine : CoreEngine {
                         } catch (_: Exception) {}
                     }
 
-                    delay(400)
+                    if (profile.protocolType == ProtocolType.MASTER_DNS) {
+                        appendLog("[MDNS] Ожидание MTU-теста и запуска локального порта :$localRelayPort...")
+                        var mdnsReady = false
+                        for (attempt in 0 until 80) {
+                            if (!isActive || !cProc.isAlive) break
+                            val canConnect = runCatching {
+                                java.net.Socket().use { s ->
+                                    s.connect(java.net.InetSocketAddress("127.0.0.1", localRelayPort), 150)
+                                    true
+                                }
+                            }.getOrDefault(false)
+                            if (canConnect) {
+                                mdnsReady = true
+                                break
+                            }
+                            delay(200)
+                        }
+                        if (!mdnsReady && isActive) {
+                            val err = "DNS-туннель не смог пройти тест MTU (сервер не ответил)"
+                            _isRunning.value = false
+                            _isConnecting.value = false
+                            _connectionError.value = err
+                            AppStateStore.addLog(LogLevel.ERROR, "MDNS", err)
+                            cProc.destroyForcibly()
+                            return@launch
+                        }
+                    } else {
+                        delay(400)
+                    }
                 }
+
+                if (!isActive) return@launch
 
                 // 2. Launch Xray Process
                 val assetDir = findAssetDir()
@@ -389,34 +421,38 @@ class DesktopCoreEngine : CoreEngine {
         _isConnecting.value = false
         _isRunning.value = false
         _connectionError.value = null
+        _stats.value = TrafficStats(isConnected = false)
+
+        startJob?.cancel()
+        startJob = null
+        statsJob?.cancel()
+        statsJob = null
+        logJob?.cancel()
+        logJob = null
+        companionLogJob?.cancel()
+        companionLogJob = null
+
+        val cp = coreProcess
+        val comp = companionProcess
+        val tp = tunProcess
+        coreProcess = null
+        companionProcess = null
+        tunProcess = null
 
         scope.launch(Dispatchers.IO) {
             try {
                 appendLog("[STOP] Stopping core engine and resetting routes")
                 AppStateStore.addLog(LogLevel.INFO, "CoreEngine", "Stopping core engine and releasing resources")
 
-                statsJob?.cancel()
-                statsJob = null
-                logJob?.cancel()
-                logJob = null
+                // Kill processes first so ports release immediately
+                runCatching { cp?.destroyForcibly() }
+                runCatching { comp?.destroyForcibly() }
+                runCatching { tp?.destroyForcibly() }
+                killExistingZombieProcesses()
 
                 // Disable system proxy
                 DesktopPrivilegeManager.disableSystemProxy()
 
-                // Kill processes
-                coreProcess?.destroy()
-                companionProcess?.destroy()
-                tunProcess?.destroy()
-                killExistingZombieProcesses()
-
-                coreProcess = null
-                companionProcess = null
-                tunProcess = null
-
-                companionLogJob?.cancel()
-                companionLogJob = null
-
-                _stats.value = TrafficStats(isConnected = false)
                 appendLog("[STOP] Stopped successfully")
                 AppStateStore.addLog(LogLevel.INFO, "CoreEngine", "Engine stopped.")
             } catch (_: Exception) {}

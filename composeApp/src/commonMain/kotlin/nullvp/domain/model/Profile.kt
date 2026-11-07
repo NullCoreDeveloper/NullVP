@@ -25,6 +25,7 @@ data class Profile(
     val protocolRawConfig: String = "",
     val subscriptionId: String? = null,
     val pingMs: Long = -1,
+    val pingDetails: String? = null,
     val serverIp: String? = null,
     val serverLocation: String? = null,
     val serverFlag: String? = null,

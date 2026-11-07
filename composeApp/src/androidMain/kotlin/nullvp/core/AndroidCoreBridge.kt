@@ -43,6 +43,9 @@ object AndroidCoreBridge {
         if (running) {
             _isConnecting.value = false
             _connectionError.value = null
+        } else {
+            _isConnecting.value = false
+            _stats.value = TrafficStats(isConnected = false)
         }
     }
 
