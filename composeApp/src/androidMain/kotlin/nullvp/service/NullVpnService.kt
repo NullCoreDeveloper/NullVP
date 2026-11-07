@@ -223,6 +223,10 @@ class NullVpnService : VpnService() {
                         // Disable broken Soft ARQ FEC 10+3 fragmentation so 1 packet = 1 DNS query with instant ACKs
                         parsed["FECDataShards"] = JsonPrimitive(0)
                         parsed["FECParityShards"] = JsonPrimitive(0)
+                        parsed["FEC_DATA_SHARDS"] = JsonPrimitive(0)
+                        parsed["FEC_PARITY_SHARDS"] = JsonPrimitive(0)
+                        parsed["BASE_ENCODE_DATA"] = JsonPrimitive(true)
+                        parsed["DATA_ENCRYPTION_METHOD"] = JsonPrimitive(1)
                         JsonObject(parsed).toString()
                     }.getOrDefault(raw)
 

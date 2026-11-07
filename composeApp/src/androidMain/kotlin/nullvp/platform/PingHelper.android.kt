@@ -7,12 +7,14 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import libv2ray.Libv2ray
+import nullvp.core.AndroidCoreBridge
 import nullvp.core.RealXrayConfigBuilder
 import nullvp.data.store.AppStateStore
 import nullvp.data.store.LogLevel
@@ -24,6 +26,7 @@ import java.net.DatagramSocket
 import java.net.HttpURLConnection
 import java.net.InetAddress
 import java.net.InetSocketAddress
+import java.net.Proxy
 import java.net.Socket
 import java.net.URL
 import java.util.concurrent.TimeUnit
@@ -63,10 +66,16 @@ actual object PingHelper {
     }
 
     actual suspend fun measureProfilePing(profile: Profile, timeoutMs: Int): SmartPingResult = withContext(Dispatchers.IO) {
-        when (profile.protocolType) {
-            ProtocolType.MASTER_DNS -> measureMdnsResolvers(profile, timeoutMs)
-            ProtocolType.VK_TURN -> measureVkTurnReachability(profile, timeoutMs)
-            else -> measureProxy204Delay(profile, timeoutMs)
+        runCatching {
+            when (profile.protocolType) {
+                ProtocolType.MASTER_DNS -> measureMdnsResolvers(profile, timeoutMs)
+                ProtocolType.VK_TURN -> measureVkTurnReachability(profile, timeoutMs)
+                else -> measureProxy204Delay(profile, timeoutMs)
+            }
+        }.getOrElse { e ->
+            val errStr = "Ошибка теста: ${e.message?.take(50) ?: e.javaClass.simpleName}"
+            AppStateStore.addLog(LogLevel.WARN, "Ping", "[${profile.name}] $errStr")
+            SmartPingResult(-1L, errStr)
         }
     }
 
@@ -74,26 +83,42 @@ actual object PingHelper {
         val rawObj = runCatching { Json.parseToJsonElement(profile.protocolRawConfig).jsonObject }.getOrNull()
         val resolvers = mutableListOf<String>()
 
-        rawObj?.get("RESOLVERS")?.let { elem ->
-            if (elem is JsonArray) {
-                elem.forEach { item ->
-                    item.jsonPrimitive.contentOrNull?.trim()?.takeIf { it.isNotEmpty() }?.let { resolvers.add(it) }
+        val resElem = rawObj?.let { it["RESOLVERS"] ?: it["resolvers"] }
+        if (resElem is JsonArray) {
+            resElem.forEach { item ->
+                when (item) {
+                    is JsonPrimitive -> item.contentOrNull?.trim()?.takeIf { it.isNotEmpty() }?.let { resolvers.add(it) }
+                    is JsonObject -> {
+                        val ip = item["IP"]?.takeIf { it is JsonPrimitive }?.jsonPrimitive?.contentOrNull
+                            ?: item["ip"]?.takeIf { it is JsonPrimitive }?.jsonPrimitive?.contentOrNull
+                            ?: item["Host"]?.takeIf { it is JsonPrimitive }?.jsonPrimitive?.contentOrNull
+                            ?: item["host"]?.takeIf { it is JsonPrimitive }?.jsonPrimitive?.contentOrNull
+                        val port = item["Port"]?.takeIf { it is JsonPrimitive }?.jsonPrimitive?.contentOrNull
+                            ?: item["port"]?.takeIf { it is JsonPrimitive }?.jsonPrimitive?.contentOrNull
+                            ?: "53"
+                        if (!ip.isNullOrBlank()) {
+                            resolvers.add("$ip:$port")
+                        }
+                    }
+                    else -> {}
                 }
-            } else if (elem is JsonPrimitive) {
-                elem.contentOrNull?.split(",", "\n", ";")?.map { it.trim() }?.filter { it.isNotEmpty() }?.let { resolvers.addAll(it) }
             }
+        } else if (resElem is JsonPrimitive) {
+            resElem.contentOrNull?.split(",", "\n", ";")?.map { it.trim() }?.filter { it.isNotEmpty() }?.let { resolvers.addAll(it) }
         }
+
         if (resolvers.isEmpty()) {
             resolvers.addAll(defaultDnsResolvers)
         }
 
-        val probeDomain = rawObj?.get("DOMAINS")?.let { elem ->
-            when (elem) {
-                is JsonArray -> elem.firstOrNull()?.jsonPrimitive?.contentOrNull
-                is JsonPrimitive -> elem.contentOrNull
+        val probeDomain = rawObj?.let { obj ->
+            val dElem = obj["DOMAINS"] ?: obj["domains"] ?: obj["DOMAIN"] ?: obj["domain"]
+            when (dElem) {
+                is JsonArray -> dElem.firstOrNull()?.let { if (it is JsonPrimitive) it.contentOrNull else null }
+                is JsonPrimitive -> dElem.contentOrNull
                 else -> null
             }
-        }?.takeIf { it.isNotBlank() && !it.contains("{{") } ?: profile.serverAddress.ifBlank { "ya.ru" }
+        }?.takeIf { it.isNotBlank() && !it.contains("{{") } ?: profile.serverAddress.ifBlank { "google.com" }
 
         val perResolverTimeout = minOf(timeoutMs, 2000)
         val distinctResolvers = resolvers.distinct()
@@ -258,34 +283,119 @@ actual object PingHelper {
         SmartPingResult(bestVk, details)
     }
 
-    private fun measureProxy204Delay(profile: Profile, timeoutMs: Int): SmartPingResult {
+    private suspend fun measureProxy204Delay(profile: Profile, timeoutMs: Int): SmartPingResult {
         return runCatching {
+            val isRunning = AndroidCoreBridge.isRunning.value
+            val activeProfile = AndroidCoreBridge.activeProfile
+            val isCurrentActive = isRunning && (activeProfile?.id == profile.id || activeProfile == null)
+
             val settings = AppStateStore.settings.value
-            val configJson = RealXrayConfigBuilder.buildJson(profile, settings, 10815)
             val testUrls = listOf(
                 "http://cp.cloudflare.com/generate_204",
                 "http://www.gstatic.com/generate_204",
                 "http://connectivitycheck.gstatic.com/generate_204"
             )
-            var delayMs = -1L
-            for (testUrl in testUrls) {
-                val d = runCatching {
-                    Libv2ray.measureOutboundDelay(configJson, testUrl)
-                }.getOrDefault(-1L)
-                if (d > 0) {
-                    delayMs = d
-                    break
+
+            // 1. If currently connected to this profile, test LIVE connection directly through local proxy or tunnel!
+            if (isCurrentActive) {
+                val proxy = Proxy(Proxy.Type.HTTP, InetSocketAddress("127.0.0.1", settings.httpPort))
+                var liveDelay = -1L
+                for (testUrl in testUrls) {
+                    val d = runCatching {
+                        val start = System.currentTimeMillis()
+                        val conn = (URL(testUrl).openConnection(proxy) as HttpURLConnection).apply {
+                            connectTimeout = minOf(timeoutMs, 3500)
+                            readTimeout = minOf(timeoutMs, 3500)
+                            requestMethod = "GET"
+                            instanceFollowRedirects = false
+                            useCaches = false
+                        }
+                        val code = conn.responseCode
+                        conn.disconnect()
+                        if (code == 204 || code == 200) {
+                            System.currentTimeMillis() - start
+                        } else -1L
+                    }.getOrDefault(-1L)
+
+                    if (d > 0) {
+                        liveDelay = d
+                        break
+                    }
+                }
+
+                // Fallback: direct HTTP (routes through active Android TUN interface)
+                if (liveDelay <= 0) {
+                    for (testUrl in testUrls) {
+                        val d = runCatching {
+                            val start = System.currentTimeMillis()
+                            val conn = (URL(testUrl).openConnection() as HttpURLConnection).apply {
+                                connectTimeout = minOf(timeoutMs, 3500)
+                                readTimeout = minOf(timeoutMs, 3500)
+                                requestMethod = "GET"
+                                instanceFollowRedirects = false
+                                useCaches = false
+                            }
+                            val code = conn.responseCode
+                            conn.disconnect()
+                            if (code == 204 || code == 200) {
+                                System.currentTimeMillis() - start
+                            } else -1L
+                        }.getOrDefault(-1L)
+
+                        if (d > 0) {
+                            liveDelay = d
+                            break
+                        }
+                    }
+                }
+
+                if (liveDelay > 0) {
+                    val msg = "204 OK • ${liveDelay}ms (${profile.protocolType.name})"
+                    AppStateStore.addLog(LogLevel.INFO, "Ping-204", "[${profile.name}] $msg")
+                    return SmartPingResult(liveDelay, msg)
                 }
             }
-            if (delayMs > 0) {
-                val msg = "204 OK • ${delayMs}ms (${profile.protocolType.name})"
-                AppStateStore.addLog(LogLevel.INFO, "Ping-204", "[${profile.name}] $msg")
-                SmartPingResult(delayMs, msg)
-            } else {
-                val msg = "204 Timeout (прокси не отвечает)"
-                AppStateStore.addLog(LogLevel.WARN, "Ping-204", "[${profile.name}] $msg")
-                SmartPingResult(-1L, msg)
+
+            // 2. If disconnected: for Xray native protocols, test via Libv2ray.measureOutboundDelay
+            if (!isRunning && (profile.protocolType == ProtocolType.VLESS ||
+                profile.protocolType == ProtocolType.VMESS ||
+                profile.protocolType == ProtocolType.TROJAN ||
+                profile.protocolType == ProtocolType.SHADOWSOCKS)
+            ) {
+                val configJson = runCatching {
+                    RealXrayConfigBuilder.buildJson(profile, settings, 10815)
+                }.getOrNull()
+
+                if (configJson != null) {
+                    var delayMs = -1L
+                    for (testUrl in testUrls) {
+                        val d = runCatching {
+                            Libv2ray.measureOutboundDelay(configJson, testUrl)
+                        }.getOrDefault(-1L)
+                        if (d > 0) {
+                            delayMs = d
+                            break
+                        }
+                    }
+                    if (delayMs > 0) {
+                        val msg = "204 OK • ${delayMs}ms (${profile.protocolType.name})"
+                        AppStateStore.addLog(LogLevel.INFO, "Ping-204", "[${profile.name}] $msg")
+                        return SmartPingResult(delayMs, msg)
+                    }
+                }
             }
+
+            // 3. Fallback: Measure TCP ping to server host:port
+            val tcpRtt = measurePing(profile.serverAddress, profile.serverPort, minOf(timeoutMs, 2500))
+            if (tcpRtt > 0) {
+                val msg = "TCP: ${tcpRtt}ms • ${profile.serverAddress}:${profile.serverPort}"
+                AppStateStore.addLog(LogLevel.INFO, "Ping-TCP", "[${profile.name}] $msg")
+                return SmartPingResult(tcpRtt, msg)
+            }
+
+            val msg = "204 Timeout (нет ответа от сервера)"
+            AppStateStore.addLog(LogLevel.WARN, "Ping-204", "[${profile.name}] $msg")
+            SmartPingResult(-1L, msg)
         }.getOrElse { e ->
             SmartPingResult(-1L, "Ошибка 204 теста: ${e.message?.take(40)}")
         }

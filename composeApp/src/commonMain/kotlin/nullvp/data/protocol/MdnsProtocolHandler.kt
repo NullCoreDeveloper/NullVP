@@ -47,9 +47,11 @@ class MdnsProtocolHandler : ProtocolHandler {
         }.getOrNull() ?: return null
 
         // Extract primary domain and listen port
-        val domains = jsonElement["DOMAINS"]?.jsonArray?.mapNotNull { it.jsonPrimitive.contentOrNull }
-            ?: jsonElement["domains"]?.jsonArray?.mapNotNull { it.jsonPrimitive.contentOrNull }
-            ?: emptyList()
+        val domains = when (val dElem = jsonElement["DOMAINS"] ?: jsonElement["domains"]) {
+            is JsonArray -> dElem.mapNotNull { it.jsonPrimitive.contentOrNull }
+            is JsonPrimitive -> listOfNotNull(dElem.contentOrNull)
+            else -> emptyList()
+        }
         val serverAddr = domains.firstOrNull() ?: "dns.tunnel"
 
         val listenPort = jsonElement["LISTEN_PORT"]?.jsonPrimitive?.intOrNull

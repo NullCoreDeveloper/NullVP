@@ -67,10 +67,16 @@ actual object PingHelper {
     }
 
     actual suspend fun measureProfilePing(profile: Profile, timeoutMs: Int): SmartPingResult = withContext(Dispatchers.IO) {
-        when (profile.protocolType) {
-            ProtocolType.MASTER_DNS -> measureMdnsResolvers(profile, timeoutMs)
-            ProtocolType.VK_TURN -> measureVkTurnReachability(profile, timeoutMs)
-            else -> measureProxy204Delay(profile, timeoutMs)
+        runCatching {
+            when (profile.protocolType) {
+                ProtocolType.MASTER_DNS -> measureMdnsResolvers(profile, timeoutMs)
+                ProtocolType.VK_TURN -> measureVkTurnReachability(profile, timeoutMs)
+                else -> measureProxy204Delay(profile, timeoutMs)
+            }
+        }.getOrElse { e ->
+            val errStr = "Ошибка теста: ${e.message?.take(50) ?: e.javaClass.simpleName}"
+            AppStateStore.addLog(LogLevel.WARN, "Ping", "[${profile.name}] $errStr")
+            SmartPingResult(-1L, errStr)
         }
     }
 
@@ -78,26 +84,42 @@ actual object PingHelper {
         val rawObj = runCatching { Json.parseToJsonElement(profile.protocolRawConfig).jsonObject }.getOrNull()
         val resolvers = mutableListOf<String>()
 
-        rawObj?.get("RESOLVERS")?.let { elem ->
-            if (elem is JsonArray) {
-                elem.forEach { item ->
-                    item.jsonPrimitive.contentOrNull?.trim()?.takeIf { it.isNotEmpty() }?.let { resolvers.add(it) }
+        val resElem = rawObj?.let { it["RESOLVERS"] ?: it["resolvers"] }
+        if (resElem is JsonArray) {
+            resElem.forEach { item ->
+                when (item) {
+                    is JsonPrimitive -> item.contentOrNull?.trim()?.takeIf { it.isNotEmpty() }?.let { resolvers.add(it) }
+                    is kotlinx.serialization.json.JsonObject -> {
+                        val ip = item["IP"]?.takeIf { it is JsonPrimitive }?.jsonPrimitive?.contentOrNull
+                            ?: item["ip"]?.takeIf { it is JsonPrimitive }?.jsonPrimitive?.contentOrNull
+                            ?: item["Host"]?.takeIf { it is JsonPrimitive }?.jsonPrimitive?.contentOrNull
+                            ?: item["host"]?.takeIf { it is JsonPrimitive }?.jsonPrimitive?.contentOrNull
+                        val port = item["Port"]?.takeIf { it is JsonPrimitive }?.jsonPrimitive?.contentOrNull
+                            ?: item["port"]?.takeIf { it is JsonPrimitive }?.jsonPrimitive?.contentOrNull
+                            ?: "53"
+                        if (!ip.isNullOrBlank()) {
+                            resolvers.add("$ip:$port")
+                        }
+                    }
+                    else -> {}
                 }
-            } else if (elem is JsonPrimitive) {
-                elem.contentOrNull?.split(",", "\n", ";")?.map { it.trim() }?.filter { it.isNotEmpty() }?.let { resolvers.addAll(it) }
             }
+        } else if (resElem is JsonPrimitive) {
+            resElem.contentOrNull?.split(",", "\n", ";")?.map { it.trim() }?.filter { it.isNotEmpty() }?.let { resolvers.addAll(it) }
         }
+
         if (resolvers.isEmpty()) {
             resolvers.addAll(defaultDnsResolvers)
         }
 
-        val probeDomain = rawObj?.get("DOMAINS")?.let { elem ->
-            when (elem) {
-                is JsonArray -> elem.firstOrNull()?.jsonPrimitive?.contentOrNull
-                is JsonPrimitive -> elem.contentOrNull
+        val probeDomain = rawObj?.let { obj ->
+            val dElem = obj["DOMAINS"] ?: obj["domains"] ?: obj["DOMAIN"] ?: obj["domain"]
+            when (dElem) {
+                is JsonArray -> dElem.firstOrNull()?.let { if (it is JsonPrimitive) it.contentOrNull else null }
+                is JsonPrimitive -> dElem.contentOrNull
                 else -> null
             }
-        }?.takeIf { it.isNotBlank() && !it.contains("{{") } ?: profile.serverAddress.ifBlank { "ya.ru" }
+        }?.takeIf { it.isNotBlank() && !it.contains("{{") } ?: profile.serverAddress.ifBlank { "google.com" }
 
         val perResolverTimeout = minOf(timeoutMs, 2000)
         val distinctResolvers = resolvers.distinct()
@@ -261,15 +283,55 @@ actual object PingHelper {
     }
 
     private suspend fun measureProxy204Delay(profile: Profile, timeoutMs: Int): SmartPingResult {
+        val isRunning = nullvp.core.DesktopCoreEngine.isRunningState
+        val activeProfile = nullvp.core.DesktopCoreEngine.activeProfile
+        val isCurrentActive = isRunning && (activeProfile?.id == profile.id || activeProfile == null)
+        val settings = AppStateStore.settings.value
+
+        val testUrls = listOf(
+            "http://cp.cloudflare.com/generate_204",
+            "http://www.gstatic.com/generate_204",
+            "http://connectivitycheck.gstatic.com/generate_204"
+        )
+
+        // 1. If currently connected to this profile, test LIVE connection directly through local proxy!
+        if (isCurrentActive) {
+            val liveProxy = Proxy(Proxy.Type.HTTP, InetSocketAddress("127.0.0.1", settings.httpPort))
+            for (urlStr in testUrls) {
+                val d = runCatching {
+                    val start = System.currentTimeMillis()
+                    val conn = (URL(urlStr).openConnection(liveProxy) as HttpURLConnection).apply {
+                        connectTimeout = minOf(timeoutMs, 3500)
+                        readTimeout = minOf(timeoutMs, 3500)
+                        requestMethod = "GET"
+                        instanceFollowRedirects = false
+                        useCaches = false
+                    }
+                    val code = conn.responseCode
+                    conn.disconnect()
+                    if (code == 204 || code == 200) {
+                        System.currentTimeMillis() - start
+                    } else -1L
+                }.getOrDefault(-1L)
+
+                if (d > 0) {
+                    val msg = "204 OK • ${d}ms (${profile.protocolType.name})"
+                    AppStateStore.addLog(LogLevel.INFO, "Ping-204", "[${profile.name}] $msg")
+                    return SmartPingResult(d, msg)
+                }
+            }
+        }
+
         val xrayBin = findXrayBinary() ?: run {
-            val tcp = measurePing(profile.serverAddress, profile.serverPort, timeoutMs)
-            return SmartPingResult(tcp, if (tcp >= 0) "TCP: ${tcp}ms" else "Нет ответа")
+            val tcp = measurePing(profile.serverAddress, profile.serverPort, minOf(timeoutMs, 2500))
+            return SmartPingResult(tcp, if (tcp >= 0) "TCP: ${tcp}ms" else "204 Timeout")
         }
 
         val tempSocksPort = runCatching { ServerSocket(0).use { it.localPort } }.getOrDefault(0)
         val tempHttpPort = runCatching { ServerSocket(0).use { it.localPort } }.getOrDefault(0)
         if (tempSocksPort <= 0 || tempHttpPort <= 0) {
-            return SmartPingResult(-1L, "Ошибка выделения порта для 204-теста")
+            val tcp = measurePing(profile.serverAddress, profile.serverPort, minOf(timeoutMs, 2500))
+            return SmartPingResult(tcp, if (tcp >= 0) "TCP: ${tcp}ms" else "Ошибка выделения порта для теста")
         }
 
         val tempSettings = AppStateStore.settings.value.copy(
@@ -350,9 +412,16 @@ actual object PingHelper {
                 AppStateStore.addLog(LogLevel.INFO, "Ping-204", "[${profile.name}] $msg")
                 SmartPingResult(bestDelay, msg)
             } else {
-                val msg = "204 Timeout (нет ответа через туннель)"
-                AppStateStore.addLog(LogLevel.WARN, "Ping-204", "[${profile.name}] $msg")
-                SmartPingResult(-1L, msg)
+                val tcp = measurePing(profile.serverAddress, profile.serverPort, minOf(timeoutMs, 2500))
+                if (tcp > 0) {
+                    val msg = "TCP: ${tcp}ms • ${profile.serverAddress}:${profile.serverPort}"
+                    AppStateStore.addLog(LogLevel.INFO, "Ping-TCP", "[${profile.name}] $msg")
+                    SmartPingResult(tcp, msg)
+                } else {
+                    val msg = "204 Timeout (нет ответа через туннель)"
+                    AppStateStore.addLog(LogLevel.WARN, "Ping-204", "[${profile.name}] $msg")
+                    SmartPingResult(-1L, msg)
+                }
             }
         } catch (e: Exception) {
             SmartPingResult(-1L, "Ошибка 204 теста: ${e.message?.take(40)}")

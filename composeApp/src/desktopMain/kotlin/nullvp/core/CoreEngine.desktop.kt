@@ -50,6 +50,8 @@ class DesktopCoreEngine : CoreEngine {
         private const val CONFIG_PATH = "/tmp/nullvp_active.json"
         private const val DRIVER_CONFIG_PATH = "/tmp/nullvp_driver.json"
         private const val TUN_DEVICE = "nullvp0"
+        var activeProfile: Profile? = null
+        var isRunningState: Boolean = false
     }
 
     private fun findBinary(name: String): File? {
@@ -135,7 +137,21 @@ class DesktopCoreEngine : CoreEngine {
                     }
 
                     val driverConfigFile = File(DRIVER_CONFIG_PATH)
-                    driverConfigFile.writeText(profile.protocolRawConfig)
+                    val rawConfig = if (profile.protocolType == ProtocolType.MASTER_DNS) {
+                        runCatching {
+                            val parsed = Json.parseToJsonElement(profile.protocolRawConfig).jsonObject.toMutableMap()
+                            parsed["FECDataShards"] = JsonPrimitive(0)
+                            parsed["FECParityShards"] = JsonPrimitive(0)
+                            parsed["FEC_DATA_SHARDS"] = JsonPrimitive(0)
+                            parsed["FEC_PARITY_SHARDS"] = JsonPrimitive(0)
+                            parsed["BASE_ENCODE_DATA"] = JsonPrimitive(true)
+                            parsed["DATA_ENCRYPTION_METHOD"] = JsonPrimitive(1)
+                            JsonObject(parsed).toString()
+                        }.getOrDefault(profile.protocolRawConfig)
+                    } else {
+                        profile.protocolRawConfig
+                    }
+                    driverConfigFile.writeText(rawConfig)
 
                     val driverPb = ProcessBuilder(
                         nullvpBinary.absolutePath,
@@ -253,6 +269,8 @@ class DesktopCoreEngine : CoreEngine {
                 }
 
                 _isRunning.value = true
+                isRunningState = true
+                activeProfile = profile
                 _isConnecting.value = false
 
                 // 3. Handle System Routing Mode
@@ -420,6 +438,8 @@ class DesktopCoreEngine : CoreEngine {
     override fun stop(): Result<Unit> {
         _isConnecting.value = false
         _isRunning.value = false
+        isRunningState = false
+        activeProfile = null
         _connectionError.value = null
         _stats.value = TrafficStats(isConnected = false)
 
