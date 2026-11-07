@@ -171,7 +171,7 @@ class DesktopCoreEngine : CoreEngine {
                             parsed["MTU_TEST_RETRIES"] = JsonPrimitive(2)
                             parsed["MTU_TEST_TIMEOUT"] = JsonPrimitive(2.0)
                             parsed["MTU_TEST_PARALLELISM"] = JsonPrimitive(16)
-                            parsed["LOG_LEVEL"] = JsonPrimitive("WARN")
+                            parsed["LOG_LEVEL"] = JsonPrimitive("INFO")
 
                             val parsedResolvers = runCatching {
                                 parsed["RESOLVERS"]?.jsonArray?.mapNotNull { it.jsonPrimitive.contentOrNull }
