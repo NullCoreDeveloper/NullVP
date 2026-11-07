@@ -17,7 +17,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import nullvp.data.store.AppStateStore
 import nullvp.domain.model.Subscription
+import nullvp.i18n.AppLanguage
+import nullvp.i18n.AppStrings
 import nullvp.theme.*
 
 @Composable
@@ -26,10 +29,13 @@ fun SubscriptionCard(
     onRefresh: () -> Unit,
     onDelete: () -> Unit,
     onRename: (String) -> Unit = {},
+    strings: AppStrings? = null,
     modifier: Modifier = Modifier
 ) {
     var showRenameDialog by remember { mutableStateOf(false) }
     var editName by remember(subscription.name) { mutableStateOf(subscription.name) }
+    val settings by AppStateStore.settings.collectAsState()
+    val isRu = settings.language == AppLanguage.RU
 
     Card(
         modifier = modifier
@@ -103,20 +109,49 @@ fun SubscriptionCard(
             ) {
                 Text(
                     text = if (subscription.totalBytes > 0) {
-                        "Used: ${formatBytes(usedBytes)} / ${formatBytes(subscription.totalBytes)}"
+                        if (isRu) "Трафик: ${formatBytes(usedBytes)} из ${formatBytes(subscription.totalBytes)}"
+                        else "Used: ${formatBytes(usedBytes)} / ${formatBytes(subscription.totalBytes)}"
                     } else {
-                        "Used: ${formatBytes(usedBytes)} (Unlimited)"
+                        if (isRu) "Трафик: ${formatBytes(usedBytes)} (безлимит)"
+                        else "Used: ${formatBytes(usedBytes)} (Unlimited)"
                     },
                     style = MaterialTheme.typography.labelSmall,
                     color = OnDarkSurfaceVariant
                 )
 
-                if (subscription.expireTimestamp > 0) {
-                    val daysLeft = ((subscription.expireTimestamp - System.currentTimeMillis()) / (1000 * 60 * 60 * 24)).coerceAtLeast(0)
+                // Normalize timestamp: seconds (< 100 млрд) vs milliseconds
+                val expireMs = when {
+                    subscription.expireTimestamp <= 0L -> 0L
+                    subscription.expireTimestamp < 100_000_000_000L -> subscription.expireTimestamp * 1000L
+                    else -> subscription.expireTimestamp
+                }
+
+                if (expireMs > 0L) {
+                    val diffMs = expireMs - System.currentTimeMillis()
+                    val (expiryText, expiryColor) = when {
+                        diffMs <= 0L -> {
+                            (if (isRu) "Срок истёк" else "Expired") to CyberRed
+                        }
+                        diffMs < 60L * 60L * 1000L -> {
+                            val mins = (diffMs / (60L * 1000L)).coerceAtLeast(1L)
+                            (if (isRu) "Осталось: $mins мин" else "$mins min left") to CyberRed
+                        }
+                        diffMs < 24L * 60L * 60L * 1000L -> {
+                            val hours = (diffMs / (60L * 60L * 1000L)).coerceAtLeast(1L)
+                            formatHoursLeft(hours, isRu) to CyberRed
+                        }
+                        else -> {
+                            val days = (diffMs / (24L * 60L * 60L * 1000L)).coerceAtLeast(1L)
+                            val color = if (days < 3L) CyberAmber else OnDarkSurfaceVariant
+                            formatDaysLeft(days, isRu) to color
+                        }
+                    }
+
                     Text(
-                        text = "$daysLeft days left",
+                        text = expiryText,
                         style = MaterialTheme.typography.labelSmall,
-                        color = if (daysLeft < 3) CyberAmber else OnDarkSurfaceVariant
+                        color = expiryColor,
+                        fontWeight = if (diffMs <= 0L || diffMs < 3L * 24L * 60L * 60L * 1000L) FontWeight.SemiBold else FontWeight.Normal
                     )
                 }
             }
@@ -126,10 +161,20 @@ fun SubscriptionCard(
     if (showRenameDialog) {
         AlertDialog(
             onDismissRequest = { showRenameDialog = false },
-            title = { Text("Переименовать подписку", color = OnDarkSurface, fontWeight = FontWeight.Bold) },
+            title = {
+                Text(
+                    text = if (isRu) "Переименовать подписку" else "Rename Subscription",
+                    color = OnDarkSurface,
+                    fontWeight = FontWeight.Bold
+                )
+            },
             text = {
                 Column {
-                    Text("Введите новое название подписки:", style = MaterialTheme.typography.bodyMedium, color = OnDarkSurfaceVariant)
+                    Text(
+                        text = if (isRu) "Введите новое название подписки:" else "Enter new subscription name:",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = OnDarkSurfaceVariant
+                    )
                     Spacer(Modifier.height(8.dp))
                     OutlinedTextField(
                         value = editName,
@@ -154,17 +199,49 @@ fun SubscriptionCard(
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = NeonCyan, contentColor = Color.Black)
                 ) {
-                    Text("Сохранить", fontWeight = FontWeight.Bold)
+                    Text(if (isRu) "Сохранить" else "Save", fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showRenameDialog = false }) {
-                    Text("Отмена", color = OnDarkSurfaceVariant)
+                    Text(if (isRu) "Отмена" else "Cancel", color = OnDarkSurfaceVariant)
                 }
             },
             containerColor = DarkSurface
         )
     }
+}
+
+private fun formatDaysLeft(days: Long, isRu: Boolean): String {
+    if (!isRu) {
+        return if (days == 1L) "1 day left" else "$days days left"
+    }
+    val rem10 = days % 10
+    val rem100 = days % 100
+    val word = when {
+        rem100 in 11..19 -> "дней"
+        rem10 == 1L -> "день"
+        rem10 in 2..4 -> "дня"
+        else -> "дней"
+    }
+    val verb = if (rem10 == 1L && rem100 != 11L) "Остался" else "Осталось"
+    return "$verb $days $word"
+}
+
+private fun formatHoursLeft(hours: Long, isRu: Boolean): String {
+    if (!isRu) {
+        return if (hours == 1L) "1 hour left" else "$hours hours left"
+    }
+    val rem10 = hours % 10
+    val rem100 = hours % 100
+    val word = when {
+        rem100 in 11..19 -> "часов"
+        rem10 == 1L -> "час"
+        rem10 in 2..4 -> "часа"
+        else -> "часов"
+    }
+    val verb = if (rem10 == 1L && rem100 != 11L) "Остался" else "Осталось"
+    return "$verb $hours $word"
 }
 
 private fun formatBytes(bytes: Long): String {

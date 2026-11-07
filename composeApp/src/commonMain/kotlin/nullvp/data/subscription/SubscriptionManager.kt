@@ -82,7 +82,7 @@ class SubscriptionManager(
                         "upload" -> upload = value
                         "download" -> download = value
                         "total" -> total = value
-                        "expire" -> expire = value
+                        "expire" -> expire = if (value in 1..99_999_999_999L) value * 1000L else value
                     }
                 }
             }

@@ -988,6 +988,7 @@ fun App() {
                                         itemsIndexed(subscriptions, key = { index, sub -> "${sub.id}_$index" }) { _, sub ->
                                             SubscriptionCard(
                                                 subscription = sub,
+                                                strings = strings,
                                                 onRefresh = {
                                                     scope.launch {
                                                         val activeHttpPort = if (isRunning) settings.httpPort else null
