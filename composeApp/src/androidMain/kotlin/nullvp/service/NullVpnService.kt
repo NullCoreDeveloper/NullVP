@@ -293,6 +293,22 @@ class NullVpnService : VpnService() {
                         error("DNS-туннель не смог пройти тест MTU (сервер не ответил)")
                     }
                     AndroidCoreBridge.addLog("[MDNS] Сессия установлена, локальный порт :$localRelayPort готов!")
+                } else if (profile.protocolType == ProtocolType.MAILRU) {
+                    localRelayPort = (20000..50000).random()
+                    val raw = profile.protocolRawConfig
+                    val updatedJson = runCatching {
+                        val parsed = Json.parseToJsonElement(raw).jsonObject.toMutableMap()
+                        parsed["localPort"] = JsonPrimitive(localRelayPort)
+                        JsonObject(parsed).toString()
+                    }.getOrDefault(raw)
+
+                    val b64 = Base64.encodeToString(updatedJson.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
+                    AndroidCoreBridge.addLog("[MAILRU] Starting internal Mail.ru engine on :$localRelayPort")
+                    Libv2ray.startMailruClient(b64, "")
+                    if (!Libv2ray.isMailruClientRunning()) {
+                        error("Mail.ru client failed to start")
+                    }
+                    AndroidCoreBridge.addLog("[MAILRU] Драйвер Mail.ru запущен на порту :$localRelayPort")
                 }
 
                 if (!isActive || isStopping.get()) return@launch
@@ -496,6 +512,11 @@ class NullVpnService : VpnService() {
         runCatching {
             if (Libv2ray.isMdnsClientRunning()) {
                 Libv2ray.stopMdnsClient()
+            }
+        }
+        runCatching {
+            if (Libv2ray.isMailruClientRunning()) {
+                Libv2ray.stopMailruClient()
             }
         }
     }
