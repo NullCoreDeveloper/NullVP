@@ -318,14 +318,19 @@ func decodeCupsUriIfPresent(uri string) string {
 				var ofCfg struct {
 					Transports []struct {
 						Type  string `json:"type"`
+						URL   string `json:"url"`
 						Rooms string `json:"rooms"`
 					} `json:"transports"`
 				}
 				if json.Unmarshal(decompressed, &ofCfg) == nil {
 					for _, tr := range ofCfg.Transports {
 						if tr.Type == "cupsonline" {
+							r := tr.URL
+							if r == "" {
+								r = tr.Rooms
+							}
 							m := map[string]interface{}{
-								"rooms":     tr.Rooms,
+								"rooms":     r,
 								"localPort": 10808,
 							}
 							b, _ := json.Marshal(m)
