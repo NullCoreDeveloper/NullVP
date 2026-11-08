@@ -309,6 +309,38 @@ class NullVpnService : VpnService() {
                         error("Mail.ru client failed to start")
                     }
                     AndroidCoreBridge.addLog("[MAILRU] Драйвер Mail.ru запущен на порту :$localRelayPort")
+                } else if (profile.protocolType == ProtocolType.AVITO) {
+                    localRelayPort = (20000..50000).random()
+                    val raw = profile.protocolRawConfig
+                    val updatedJson = runCatching {
+                        val parsed = Json.parseToJsonElement(raw).jsonObject.toMutableMap()
+                        parsed["localPort"] = JsonPrimitive(localRelayPort)
+                        JsonObject(parsed).toString()
+                    }.getOrDefault(raw)
+
+                    val b64 = Base64.encodeToString(updatedJson.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
+                    AndroidCoreBridge.addLog("[AVITO] Starting internal Avito engine on :$localRelayPort")
+                    Libv2ray.startAvitoClient(b64, "")
+                    if (!Libv2ray.isAvitoClientRunning()) {
+                        error("Avito client failed to start")
+                    }
+                    AndroidCoreBridge.addLog("[AVITO] Драйвер Avito запущен на порту :$localRelayPort")
+                } else if (profile.protocolType == ProtocolType.CUPSONLINE) {
+                    localRelayPort = (20000..50000).random()
+                    val raw = profile.protocolRawConfig
+                    val updatedJson = runCatching {
+                        val parsed = Json.parseToJsonElement(raw).jsonObject.toMutableMap()
+                        parsed["localPort"] = JsonPrimitive(localRelayPort)
+                        JsonObject(parsed).toString()
+                    }.getOrDefault(raw)
+
+                    val b64 = Base64.encodeToString(updatedJson.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
+                    AndroidCoreBridge.addLog("[CUPS] Starting internal Cups engine on :$localRelayPort")
+                    Libv2ray.startCupsClient(b64, "")
+                    if (!Libv2ray.isCupsClientRunning()) {
+                        error("Cups client failed to start")
+                    }
+                    AndroidCoreBridge.addLog("[CUPS] Драйвер Cups запущен на порту :$localRelayPort")
                 }
 
                 if (!isActive || isStopping.get()) return@launch
@@ -519,6 +551,16 @@ class NullVpnService : VpnService() {
                 Libv2ray.stopMailruClient()
             }
         }
+        runCatching {
+            if (Libv2ray.isAvitoClientRunning()) {
+                Libv2ray.stopAvitoClient()
+            }
+        }
+        runCatching {
+            if (Libv2ray.isCupsClientRunning()) {
+                Libv2ray.stopCupsClient()
+            }
+        }
     }
 
     private fun stopVpn() {
@@ -567,6 +609,15 @@ class NullVpnService : VpnService() {
             }
             runCatching {
                 if (Libv2ray.isMdnsClientRunning()) Libv2ray.stopMdnsClient()
+            }
+            runCatching {
+                if (Libv2ray.isMailruClientRunning()) Libv2ray.stopMailruClient()
+            }
+            runCatching {
+                if (Libv2ray.isAvitoClientRunning()) Libv2ray.stopAvitoClient()
+            }
+            runCatching {
+                if (Libv2ray.isCupsClientRunning()) Libv2ray.stopCupsClient()
             }
             runCatching { pfd?.close() }
         }.start()

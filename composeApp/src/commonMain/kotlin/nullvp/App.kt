@@ -78,6 +78,8 @@ fun App() {
         ProtocolRegistry.register(MdnsProtocolHandler())
         ProtocolRegistry.register(VkTurnProtocolHandler())
         ProtocolRegistry.register(MailruProtocolHandler())
+        ProtocolRegistry.register(AvitoProtocolHandler())
+        ProtocolRegistry.register(CupsonlineProtocolHandler())
         ProtocolRegistry.register(VlessProtocolHandler())
         ProtocolRegistry.register(Hysteria2ProtocolHandler())
         ProtocolRegistry.register(VmessProtocolHandler())

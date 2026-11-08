@@ -14,6 +14,8 @@ class ProtocolTest {
         ProtocolRegistry.register(MdnsProtocolHandler())
         ProtocolRegistry.register(VkTurnProtocolHandler())
         ProtocolRegistry.register(MailruProtocolHandler())
+        ProtocolRegistry.register(AvitoProtocolHandler())
+        ProtocolRegistry.register(CupsonlineProtocolHandler())
         ProtocolRegistry.register(VlessProtocolHandler())
         ProtocolRegistry.register(Hysteria2ProtocolHandler())
         ProtocolRegistry.register(VmessProtocolHandler())
@@ -122,5 +124,31 @@ class ProtocolTest {
         assertEquals(1, deduplicated.size)
         assertEquals(true, deduplicated[0].protocolRawConfig.contains("mailru"))
         assertEquals(true, deduplicated[0].protocolRawConfig.contains("cookies"))
+    }
+
+    @Test
+    fun testAvitoParsing() {
+        val b64 = java.util.Base64.getEncoder().encodeToString("""{"rooms":"author1/room1,author2/room2","server":"code.avito.ru"}""".toByteArray())
+        val link = "avito://$b64#TestAvito"
+        val profile = ProtocolRegistry.parse(link)
+
+        assertNotNull(profile)
+        assertEquals("TestAvito", profile.name)
+        assertEquals("code.avito.ru", profile.serverAddress)
+        assertEquals(443, profile.serverPort)
+        assertEquals(ProtocolType.AVITO, profile.protocolType)
+    }
+
+    @Test
+    fun testCupsonlineParsing() {
+        val b64 = java.util.Base64.getEncoder().encodeToString("""{"rooms":"room-uuid-1,room-uuid-2","server":"interview.cups.online"}""".toByteArray())
+        val link = "cupsonline://$b64#TestCups"
+        val profile = ProtocolRegistry.parse(link)
+
+        assertNotNull(profile)
+        assertEquals("TestCups", profile.name)
+        assertEquals("interview.cups.online", profile.serverAddress)
+        assertEquals(443, profile.serverPort)
+        assertEquals(ProtocolType.CUPSONLINE, profile.protocolType)
     }
 }

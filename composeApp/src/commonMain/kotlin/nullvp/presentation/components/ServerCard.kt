@@ -165,6 +165,8 @@ fun ProtocolBadge(protocolType: ProtocolType) {
         ProtocolType.MASTER_DNS -> "DNS" to Color(0xFF6200EA)
         ProtocolType.VK_TURN -> "VK TURN" to Color(0xFF0077FF)
         ProtocolType.MAILRU -> "MAILRU" to Color(0xFF005FF9)
+        ProtocolType.AVITO -> "AVITO" to Color(0xFF00AAFF)
+        ProtocolType.CUPSONLINE -> "CUPS" to Color(0xFF7B1FA2)
         ProtocolType.VLESS -> "VLESS" to Color(0xFF00B0FF)
         ProtocolType.VMESS -> "VMESS" to Color(0xFF00897B)
         ProtocolType.TROJAN -> "TROJAN" to Color(0xFFE91E63)

@@ -13,6 +13,8 @@ enum class ProtocolType {
     MASTER_DNS,
     VK_TURN,
     MAILRU,
+    AVITO,
+    CUPSONLINE,
     CUSTOM
 }
 

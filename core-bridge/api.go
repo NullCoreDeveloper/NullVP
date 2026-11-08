@@ -66,6 +66,10 @@ func StartProfile(protocolType string, configJsonBase64 string, tunFd int, logPa
 		d = driver.NewVkTurnDriver()
 	case "MAILRU", "mailru", "openflux", "OPENFLUX":
 		d = driver.NewMailruDriver()
+	case "AVITO", "avito":
+		d = driver.NewAvitoDriver()
+	case "CUPSONLINE", "cupsonline":
+		d = driver.NewCupsDriver()
 	default:
 		return fmt.Errorf("unsupported protocol type: %s", protocolType)
 	}
