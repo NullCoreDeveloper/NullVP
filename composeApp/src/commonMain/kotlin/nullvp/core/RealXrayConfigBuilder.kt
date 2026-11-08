@@ -141,9 +141,9 @@ object RealXrayConfigBuilder {
                         put("outboundTag", "api")
                     }
 
-                    // For DNS Tunnel (MASTER_DNS), block QUIC (UDP/443) and DoT (TCP+UDP/853)
+                    // For DNS Tunnel (MASTER_DNS) and Mail.ru Docs (MAILRU), block QUIC (UDP/443) and DoT (TCP+UDP/853)
                     // so apps immediately fall back to TCP and standard DNS without flooding the tunnel.
-                    if (profile.protocolType == ProtocolType.MASTER_DNS) {
+                    if (profile.protocolType == ProtocolType.MASTER_DNS || profile.protocolType == ProtocolType.MAILRU) {
                         addJsonObject {
                             put("type", "field")
                             put("outboundTag", "block")
@@ -565,7 +565,7 @@ object RealXrayConfigBuilder {
                     }
                 }
 
-                ProtocolType.MASTER_DNS -> {
+                ProtocolType.MAILRU, ProtocolType.MASTER_DNS -> {
                     put("protocol", "socks")
                     putJsonObject("settings") {
                         putJsonArray("servers") {
@@ -592,7 +592,7 @@ object RealXrayConfigBuilder {
             }
 
             // MUX Settings
-            if (settings.muxEnabled && profile.protocolType != ProtocolType.HYSTERIA2 && profile.protocolType != ProtocolType.MASTER_DNS && profile.protocolType != ProtocolType.VK_TURN) {
+            if (settings.muxEnabled && profile.protocolType != ProtocolType.HYSTERIA2 && profile.protocolType != ProtocolType.MASTER_DNS && profile.protocolType != ProtocolType.VK_TURN && profile.protocolType != ProtocolType.MAILRU) {
                 putJsonObject("mux") {
                     put("enabled", true)
                     put("concurrency", settings.muxConcurrency)

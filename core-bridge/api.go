@@ -64,6 +64,8 @@ func StartProfile(protocolType string, configJsonBase64 string, tunFd int, logPa
 		d = driver.NewMdnsDriver()
 	case "VK_TURN", "vk_turn", "vkturn", "freeturn":
 		d = driver.NewVkTurnDriver()
+	case "MAILRU", "mailru", "openflux", "OPENFLUX":
+		d = driver.NewMailruDriver()
 	default:
 		return fmt.Errorf("unsupported protocol type: %s", protocolType)
 	}
@@ -115,6 +117,9 @@ func GetStats() string {
 		if vk, ok := currentDriver.(*driver.VkTurnDriver); ok {
 			st.ActiveStreams = vk.ActiveStreams()
 			st.LastError = vk.LastError()
+		} else if mr, ok := currentDriver.(*driver.MailruDriver); ok {
+			st.ActiveStreams = mr.ActiveStreams()
+			st.LastError = mr.LastError()
 		}
 	}
 

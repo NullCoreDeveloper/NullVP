@@ -1,9 +1,10 @@
 module nullvp-core
 
-go 1.26
+go 1.26.0
 
 require (
 	github.com/2dust/AndroidLibXrayLite v0.0.0-00010101000000-000000000000
+	github.com/gorilla/websocket v1.5.3
 	masterdnsvpn-go v0.0.0-00010101000000-000000000000
 )
 
@@ -36,10 +37,10 @@ require (
 	github.com/wlynxg/anet v0.0.5 // indirect
 	github.com/xtaci/kcp-go/v5 v5.6.72 // indirect
 	github.com/xtaci/smux v1.5.57 // indirect
-	golang.org/x/crypto v0.54.0 // indirect
-	golang.org/x/net v0.57.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
-	golang.org/x/text v0.40.0 // indirect
+	golang.org/x/crypto v0.58.0 // indirect
+	golang.org/x/net v0.61.0 // indirect
+	golang.org/x/sys v0.49.0 // indirect
+	golang.org/x/text v0.43.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 )
 

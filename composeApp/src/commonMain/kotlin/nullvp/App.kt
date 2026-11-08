@@ -77,6 +77,7 @@ fun App() {
     LaunchedEffect(Unit) {
         ProtocolRegistry.register(MdnsProtocolHandler())
         ProtocolRegistry.register(VkTurnProtocolHandler())
+        ProtocolRegistry.register(MailruProtocolHandler())
         ProtocolRegistry.register(VlessProtocolHandler())
         ProtocolRegistry.register(Hysteria2ProtocolHandler())
         ProtocolRegistry.register(VmessProtocolHandler())

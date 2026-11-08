@@ -103,7 +103,7 @@ class DesktopCoreEngine : CoreEngine {
                 appendLog("[START] Preparing profile '${profile.name}' (${profile.protocolType})")
                 AppStateStore.addLog(LogLevel.INFO, "CoreEngine", "Building configuration for '${profile.name}'")
 
-                val isCustomDriver = profile.protocolType == ProtocolType.MASTER_DNS || profile.protocolType == ProtocolType.VK_TURN
+                val isCustomDriver = profile.protocolType == ProtocolType.MASTER_DNS || profile.protocolType == ProtocolType.VK_TURN || profile.protocolType == ProtocolType.MAILRU
                 val localRelayPort = if (isCustomDriver) {
                     runCatching { java.net.ServerSocket(0).use { it.localPort } }.getOrDefault(10815)
                 } else 10815

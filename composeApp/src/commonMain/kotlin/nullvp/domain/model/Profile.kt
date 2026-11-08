@@ -12,6 +12,7 @@ enum class ProtocolType {
     HYSTERIA2,
     MASTER_DNS,
     VK_TURN,
+    MAILRU,
     CUSTOM
 }
 
