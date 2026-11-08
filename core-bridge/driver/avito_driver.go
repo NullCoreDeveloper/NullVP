@@ -663,16 +663,42 @@ func (t *avitoTransport) sendChunkToAny(chunk []byte) {
 }
 
 func unpackAvitoRooms(packed string) []avitoRoomInfo {
-	if packed == "" {
+	s := strings.TrimSpace(packed)
+	if s == "" {
 		return nil
 	}
-	parts := strings.Split(packed, ",")
+	if u, err := url.Parse(s); err == nil && u.Query().Get("rooms") != "" {
+		s = u.Query().Get("rooms")
+	}
+	var raw []byte
+	if b, errDec := base64.RawURLEncoding.DecodeString(s); errDec == nil {
+		raw = b
+	} else if b, errDec := base64.StdEncoding.DecodeString(s); errDec == nil {
+		raw = b
+	}
+	var ids []string
+	if len(raw) > 0 {
+		_ = json.Unmarshal(raw, &ids)
+	}
+	if len(ids) == 0 && strings.HasPrefix(s, "[") {
+		_ = json.Unmarshal([]byte(s), &ids)
+	}
+	if len(ids) == 0 {
+		parts := strings.Split(s, ",")
+		for _, p := range parts {
+			p = strings.TrimSpace(p)
+			if p != "" {
+				ids = append(ids, p)
+			}
+		}
+	}
 	var res []avitoRoomInfo
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		kv := strings.SplitN(p, "/", 2)
-		if len(kv) == 2 {
+	for _, id := range ids {
+		if strings.Contains(id, "/") {
+			kv := strings.SplitN(id, "/", 2)
 			res = append(res, avitoRoomInfo{AuthorID: kv[0], RoomID: kv[1]})
+		} else {
+			res = append(res, avitoRoomInfo{AuthorID: "Developer", RoomID: id})
 		}
 	}
 	return res

@@ -925,16 +925,34 @@ func asCursorInt(val interface{}) (uint64, error) {
 }
 
 func unpackCupsRooms(packed string) []string {
-	if packed == "" {
+	s := strings.TrimSpace(packed)
+	if s == "" {
 		return nil
 	}
-	parts := strings.Split(packed, ",")
-	var res []string
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p != "" {
-			res = append(res, p)
+	if u, err := url.Parse(s); err == nil && u.Query().Get("rooms") != "" {
+		s = u.Query().Get("rooms")
+	}
+	var raw []byte
+	if b, errDec := base64.RawURLEncoding.DecodeString(s); errDec == nil {
+		raw = b
+	} else if b, errDec := base64.StdEncoding.DecodeString(s); errDec == nil {
+		raw = b
+	}
+	var ids []string
+	if len(raw) > 0 {
+		_ = json.Unmarshal(raw, &ids)
+	}
+	if len(ids) == 0 && strings.HasPrefix(s, "[") {
+		_ = json.Unmarshal([]byte(s), &ids)
+	}
+	if len(ids) == 0 {
+		parts := strings.Split(s, ",")
+		for _, p := range parts {
+			p = strings.TrimSpace(p)
+			if p != "" {
+				ids = append(ids, p)
+			}
 		}
 	}
-	return res
+	return ids
 }
