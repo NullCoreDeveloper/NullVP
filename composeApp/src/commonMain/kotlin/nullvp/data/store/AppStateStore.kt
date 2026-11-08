@@ -97,10 +97,11 @@ object AppStateStore {
     }
 
     fun deduplicateVkProfiles(profiles: List<Profile>): List<Profile> {
+        val mailruCleaned = deduplicateMailruProfiles(profiles)
         val result = mutableListOf<Profile>()
         val seenEndpoints = mutableMapOf<String, Profile>()
 
-        for (profile in profiles) {
+        for (profile in mailruCleaned) {
             if (profile.protocolType == ProtocolType.VK_TURN) {
                 var vkLink = ""
                 var hasSecretKey = false
@@ -152,6 +153,78 @@ object AppStateStore {
             }
         }
         return result
+    }
+
+    fun deduplicateMailruProfiles(profiles: List<Profile>): List<Profile> {
+        val result = mutableListOf<Profile>()
+        val seenDocuments = mutableMapOf<String, Profile>()
+
+        for (profile in profiles) {
+            if (profile.protocolType == ProtocolType.MAILRU) {
+                var docUrl = ""
+                var format = ""
+                runCatching {
+                    val obj = Json.parseToJsonElement(profile.protocolRawConfig).jsonObject
+                    docUrl = obj["url"]?.jsonPrimitive?.contentOrNull
+                        ?: obj["mailruUrl"]?.jsonPrimitive?.contentOrNull
+                        ?: obj["weblink"]?.jsonPrimitive?.contentOrNull
+                        ?: ""
+                    format = obj["format"]?.jsonPrimitive?.contentOrNull ?: ""
+                }
+
+                val docKey = normalizeMailruDocKey(docUrl)
+                if (docKey.isBlank()) {
+                    result.add(profile)
+                    continue
+                }
+
+                val existing = seenDocuments[docKey]
+                if (existing != null) {
+                    var existingFormat = ""
+                    runCatching {
+                        val obj = Json.parseToJsonElement(existing.protocolRawConfig).jsonObject
+                        existingFormat = obj["format"]?.jsonPrimitive?.contentOrNull ?: ""
+                    }
+
+                    // If existing is OpenFlux and current is native Mail.ru, swap it to keep Mail.ru!
+                    if (existingFormat == "openflux" && format == "mailru") {
+                        val idx = result.indexOf(existing)
+                        if (idx != -1) {
+                            result[idx] = profile
+                        }
+                        seenDocuments[docKey] = profile
+                    } else if (existingFormat == "mailru" && format == "openflux") {
+                        // Drop duplicate OpenFlux profile, keeping custom Mail.ru client format!
+                        // Do not add to result.
+                    } else if (profile.protocolRawConfig.length > existing.protocolRawConfig.length) {
+                        val idx = result.indexOf(existing)
+                        if (idx != -1) {
+                            result[idx] = profile
+                        }
+                        seenDocuments[docKey] = profile
+                    }
+                } else {
+                    seenDocuments[docKey] = profile
+                    result.add(profile)
+                }
+            } else {
+                result.add(profile)
+            }
+        }
+        return result
+    }
+
+    private fun normalizeMailruDocKey(url: String): String {
+        val trimmed = url.trim()
+        val publicIdx = trimmed.indexOf("/public/")
+        if (publicIdx != -1) {
+            return trimmed.substring(publicIdx + 8).trimEnd('/').lowercase()
+        }
+        val slashParts = trimmed.split('/')
+        if (slashParts.size >= 2) {
+            return "${slashParts[slashParts.size - 2]}/${slashParts[slashParts.size - 1]}".lowercase()
+        }
+        return trimmed.lowercase()
     }
 
     private fun saveState() {

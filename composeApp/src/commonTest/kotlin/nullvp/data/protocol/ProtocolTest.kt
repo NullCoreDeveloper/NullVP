@@ -13,6 +13,7 @@ class ProtocolTest {
     fun setup() {
         ProtocolRegistry.register(MdnsProtocolHandler())
         ProtocolRegistry.register(VkTurnProtocolHandler())
+        ProtocolRegistry.register(MailruProtocolHandler())
         ProtocolRegistry.register(VlessProtocolHandler())
         ProtocolRegistry.register(Hysteria2ProtocolHandler())
         ProtocolRegistry.register(VmessProtocolHandler())
@@ -80,5 +81,46 @@ class ProtocolTest {
         assertEquals("trojan.example.com", profile.serverAddress)
         assertEquals(443, profile.serverPort)
         assertEquals(ProtocolType.TROJAN, profile.protocolType)
+    }
+
+    @Test
+    fun testMailruParsingAndDeduplication() {
+        val mailruJson = """{"server":"cloud.mail.ru","port":443,"url":"https://cloud.mail.ru/public/abcd/1234","cookies":"act=test","format":"mailru"}"""
+        val mailruB64 = java.util.Base64.getEncoder().encodeToString(mailruJson.toByteArray(Charsets.UTF_8))
+        val mailruLink = "mailru://$mailruB64#MailruDoc"
+
+        val p1 = ProtocolRegistry.parse(mailruLink)
+        assertNotNull(p1)
+        assertEquals(ProtocolType.MAILRU, p1.protocolType)
+        assertEquals("MailruDoc", p1.name)
+
+        // Generate openflux://v1/ format for same document
+        val ofJson = """{"name":"OpenFluxDoc","mode":"stream","transports":[{"type":"mailru","url":"https://cloud.mail.ru/public/abcd/1234"}]}"""
+        val raw = ofJson.toByteArray(Charsets.UTF_8)
+        val deflater = java.util.zip.Deflater(java.util.zip.Deflater.BEST_COMPRESSION, true)
+        deflater.setInput(raw)
+        deflater.finish()
+        val buf = ByteArray(1024)
+        val out = java.io.ByteArrayOutputStream()
+        while (!deflater.finished()) {
+            val count = deflater.deflate(buf)
+            out.write(buf, 0, count)
+        }
+        deflater.end()
+        val b64url = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(out.toByteArray())
+        val openfluxLink = "openflux://v1/$b64url"
+
+        val p2 = ProtocolRegistry.parse(openfluxLink)
+        assertNotNull(p2)
+        assertEquals(ProtocolType.MAILRU, p2.protocolType)
+        assertEquals("OpenFluxDoc", p2.name)
+
+        // Test deduplication: when subscription contains both openflux and mailru,
+        // openflux duplicate must be dropped, keeping custom mailru client format!
+        val combined = listOf(p2, p1)
+        val deduplicated = nullvp.data.store.AppStateStore.deduplicateMailruProfiles(combined)
+        assertEquals(1, deduplicated.size)
+        assertEquals(true, deduplicated[0].protocolRawConfig.contains("mailru"))
+        assertEquals(true, deduplicated[0].protocolRawConfig.contains("cookies"))
     }
 }
