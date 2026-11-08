@@ -18,7 +18,7 @@ import java.util.zip.InflaterInputStream
 class CupsonlineProtocolHandler : ProtocolHandler {
     override val protocolType: ProtocolType = ProtocolType.CUPSONLINE
     override val scheme: String = "cupsonline"
-    override val alternativeSchemes: List<String> = listOf("openflux-cups", "cups")
+    override val alternativeSchemes: List<String> = listOf("openflux", "openflux-cups", "cups")
     override val displayName: String = "VK Cups.online (OpenFlux)"
     override val capabilities: ProtocolCapabilities = ProtocolCapabilities(
         supportsUdp = false,
@@ -93,6 +93,7 @@ class CupsonlineProtocolHandler : ProtocolHandler {
             put("server", "interview.cups.online")
             put("port", 443)
             put("localPort", 10808)
+            put("format", if (schemePart == "cupsonline") "cupsonline" else "openflux")
         }
 
         return Profile(

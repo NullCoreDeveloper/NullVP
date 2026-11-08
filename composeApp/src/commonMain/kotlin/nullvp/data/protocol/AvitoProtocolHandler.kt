@@ -18,7 +18,7 @@ import java.util.zip.InflaterInputStream
 class AvitoProtocolHandler : ProtocolHandler {
     override val protocolType: ProtocolType = ProtocolType.AVITO
     override val scheme: String = "avito"
-    override val alternativeSchemes: List<String> = listOf("openflux-avito")
+    override val alternativeSchemes: List<String> = listOf("openflux", "openflux-avito")
     override val displayName: String = "Avito Code (OpenFlux)"
     override val capabilities: ProtocolCapabilities = ProtocolCapabilities(
         supportsUdp = false,
@@ -93,6 +93,7 @@ class AvitoProtocolHandler : ProtocolHandler {
             put("server", "code.avito.ru")
             put("port", 443)
             put("localPort", 10808)
+            put("format", if (schemePart == "avito") "avito" else "openflux")
         }
 
         return Profile(

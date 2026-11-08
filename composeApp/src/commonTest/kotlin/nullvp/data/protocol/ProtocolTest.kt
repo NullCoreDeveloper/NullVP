@@ -137,6 +137,30 @@ class ProtocolTest {
         assertEquals("code.avito.ru", profile.serverAddress)
         assertEquals(443, profile.serverPort)
         assertEquals(ProtocolType.AVITO, profile.protocolType)
+
+        // Test openflux variant
+        val ofJson = """{"name":"AvitoOpenFlux","mode":"stream","transports":[{"type":"avito","rooms":"author1/room1,author2/room2"}]}"""
+        val raw = ofJson.toByteArray(Charsets.UTF_8)
+        val deflater = java.util.zip.Deflater(java.util.zip.Deflater.BEST_COMPRESSION, true)
+        deflater.setInput(raw)
+        deflater.finish()
+        val buf = ByteArray(1024)
+        val out = java.io.ByteArrayOutputStream()
+        while (!deflater.finished()) {
+            val count = deflater.deflate(buf)
+            out.write(buf, 0, count)
+        }
+        deflater.end()
+        val b64url = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(out.toByteArray())
+        val openfluxLink = "openflux://v1/$b64url"
+        val p2 = ProtocolRegistry.parse(openfluxLink)
+        assertNotNull(p2)
+        assertEquals(ProtocolType.AVITO, p2.protocolType)
+
+        // Deduplication test
+        val deduplicated = nullvp.data.store.AppStateStore.deduplicateMailruProfiles(listOf(p2, profile))
+        assertEquals(1, deduplicated.size)
+        assertEquals(true, deduplicated[0].protocolRawConfig.contains(""""format":"avito""""))
     }
 
     @Test
@@ -150,5 +174,29 @@ class ProtocolTest {
         assertEquals("interview.cups.online", profile.serverAddress)
         assertEquals(443, profile.serverPort)
         assertEquals(ProtocolType.CUPSONLINE, profile.protocolType)
+
+        // Test openflux variant
+        val ofJson = """{"name":"CupsOpenFlux","mode":"stream","transports":[{"type":"cupsonline","rooms":"room-uuid-1,room-uuid-2"}]}"""
+        val raw = ofJson.toByteArray(Charsets.UTF_8)
+        val deflater = java.util.zip.Deflater(java.util.zip.Deflater.BEST_COMPRESSION, true)
+        deflater.setInput(raw)
+        deflater.finish()
+        val buf = ByteArray(1024)
+        val out = java.io.ByteArrayOutputStream()
+        while (!deflater.finished()) {
+            val count = deflater.deflate(buf)
+            out.write(buf, 0, count)
+        }
+        deflater.end()
+        val b64url = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(out.toByteArray())
+        val openfluxLink = "openflux://v1/$b64url"
+        val p2 = ProtocolRegistry.parse(openfluxLink)
+        assertNotNull(p2)
+        assertEquals(ProtocolType.CUPSONLINE, p2.protocolType)
+
+        // Deduplication test
+        val deduplicated = nullvp.data.store.AppStateStore.deduplicateMailruProfiles(listOf(p2, profile))
+        assertEquals(1, deduplicated.size)
+        assertEquals(true, deduplicated[0].protocolRawConfig.contains(""""format":"cupsonline""""))
     }
 }

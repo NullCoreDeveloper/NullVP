@@ -207,6 +207,84 @@ object AppStateStore {
                     seenDocuments[docKey] = profile
                     result.add(profile)
                 }
+            } else if (profile.protocolType == ProtocolType.AVITO) {
+                var rooms = ""
+                var format = ""
+                runCatching {
+                    val obj = Json.parseToJsonElement(profile.protocolRawConfig).jsonObject
+                    rooms = obj["rooms"]?.jsonPrimitive?.contentOrNull ?: ""
+                    format = obj["format"]?.jsonPrimitive?.contentOrNull ?: ""
+                }
+                val avitoKey = "avito_" + rooms.trim().lowercase()
+                if (rooms.isBlank()) {
+                    result.add(profile)
+                    continue
+                }
+                val existing = seenDocuments[avitoKey]
+                if (existing != null) {
+                    var existingFormat = ""
+                    runCatching {
+                        val obj = Json.parseToJsonElement(existing.protocolRawConfig).jsonObject
+                        existingFormat = obj["format"]?.jsonPrimitive?.contentOrNull ?: ""
+                    }
+                    if (existingFormat == "openflux" && format == "avito") {
+                        val idx = result.indexOf(existing)
+                        if (idx != -1) {
+                            result[idx] = profile
+                        }
+                        seenDocuments[avitoKey] = profile
+                    } else if (existingFormat == "avito" && format == "openflux") {
+                        // Drop duplicate OpenFlux profile
+                    } else if (profile.protocolRawConfig.length > existing.protocolRawConfig.length) {
+                        val idx = result.indexOf(existing)
+                        if (idx != -1) {
+                            result[idx] = profile
+                        }
+                        seenDocuments[avitoKey] = profile
+                    }
+                } else {
+                    seenDocuments[avitoKey] = profile
+                    result.add(profile)
+                }
+            } else if (profile.protocolType == ProtocolType.CUPSONLINE) {
+                var rooms = ""
+                var format = ""
+                runCatching {
+                    val obj = Json.parseToJsonElement(profile.protocolRawConfig).jsonObject
+                    rooms = obj["rooms"]?.jsonPrimitive?.contentOrNull ?: ""
+                    format = obj["format"]?.jsonPrimitive?.contentOrNull ?: ""
+                }
+                val cupsKey = "cups_" + rooms.trim().lowercase()
+                if (rooms.isBlank()) {
+                    result.add(profile)
+                    continue
+                }
+                val existing = seenDocuments[cupsKey]
+                if (existing != null) {
+                    var existingFormat = ""
+                    runCatching {
+                        val obj = Json.parseToJsonElement(existing.protocolRawConfig).jsonObject
+                        existingFormat = obj["format"]?.jsonPrimitive?.contentOrNull ?: ""
+                    }
+                    if (existingFormat == "openflux" && format == "cupsonline") {
+                        val idx = result.indexOf(existing)
+                        if (idx != -1) {
+                            result[idx] = profile
+                        }
+                        seenDocuments[cupsKey] = profile
+                    } else if (existingFormat == "cupsonline" && format == "openflux") {
+                        // Drop duplicate OpenFlux profile
+                    } else if (profile.protocolRawConfig.length > existing.protocolRawConfig.length) {
+                        val idx = result.indexOf(existing)
+                        if (idx != -1) {
+                            result[idx] = profile
+                        }
+                        seenDocuments[cupsKey] = profile
+                    }
+                } else {
+                    seenDocuments[cupsKey] = profile
+                    result.add(profile)
+                }
             } else {
                 result.add(profile)
             }

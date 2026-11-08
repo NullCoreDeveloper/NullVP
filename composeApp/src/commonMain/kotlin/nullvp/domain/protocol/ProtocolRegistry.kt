@@ -8,19 +8,25 @@ import nullvp.domain.model.ProtocolType
  */
 object ProtocolRegistry {
     private val handlersByType = mutableMapOf<ProtocolType, ProtocolHandler>()
-    private val handlersByScheme = mutableMapOf<String, ProtocolHandler>()
+    private val handlersByScheme = mutableMapOf<String, MutableList<ProtocolHandler>>()
 
     fun register(handler: ProtocolHandler) {
         handlersByType[handler.protocolType] = handler
-        handlersByScheme[handler.scheme.lowercase()] = handler
+        val mainList = handlersByScheme.getOrPut(handler.scheme.lowercase()) { mutableListOf() }
+        if (!mainList.contains(handler)) {
+            mainList.add(handler)
+        }
         for (alt in handler.alternativeSchemes) {
-            handlersByScheme[alt.lowercase()] = handler
+            val altList = handlersByScheme.getOrPut(alt.lowercase()) { mutableListOf() }
+            if (!altList.contains(handler)) {
+                altList.add(handler)
+            }
         }
     }
 
     fun getHandler(type: ProtocolType): ProtocolHandler? = handlersByType[type]
 
-    fun getHandlerForScheme(scheme: String): ProtocolHandler? = handlersByScheme[scheme.lowercase()]
+    fun getHandlerForScheme(scheme: String): ProtocolHandler? = handlersByScheme[scheme.lowercase()]?.firstOrNull()
 
     /**
      * Attempts to parse any supported URI by matching its scheme against registered handlers.
@@ -30,8 +36,12 @@ object ProtocolRegistry {
         val colonIdx = trimmed.indexOf("://")
         if (colonIdx == -1) return null
         val scheme = trimmed.substring(0, colonIdx).lowercase()
-        val handler = getHandlerForScheme(scheme) ?: return null
-        return handler.parseUri(trimmed)
+        val handlers = handlersByScheme[scheme] ?: return null
+        for (handler in handlers) {
+            val profile = handler.parseUri(trimmed)
+            if (profile != null) return profile
+        }
+        return null
     }
 
     fun allHandlers(): List<ProtocolHandler> = handlersByType.values.toList()
