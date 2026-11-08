@@ -30,6 +30,7 @@ object AndroidCoreBridge {
     var appSettings: AppSettings = AppSettings()
 
     fun addLog(msg: String) {
+        android.util.Log.i("NullVP", msg)
         val current = _logs.value.toMutableList()
         current.add(msg)
         if (current.size > 2000) {
