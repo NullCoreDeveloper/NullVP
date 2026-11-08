@@ -105,6 +105,12 @@ class NullVpnService : VpnService() {
                 override fun openCaptcha(url: String?) {
                     if (!url.isNullOrBlank()) {
                         AndroidCoreBridge.setCaptchaUrl(url)
+                        AndroidCoreBridge.addLog("[CAPTCHA] Отображение капчи внутри приложения: $url")
+                        try {
+                            nullvp.ui.CaptchaActivity.start(applicationContext, url)
+                        } catch (e: Exception) {
+                            AndroidCoreBridge.addLog("[CAPTCHA] Ошибка запуска CaptchaActivity: ${e.message}")
+                        }
                     }
                 }
             })
@@ -214,6 +220,25 @@ class NullVpnService : VpnService() {
                     if (!Libv2ray.isVkTurnClientRunning()) {
                         error("VK TURN client failed to start")
                     }
+
+                    // Wait up to 90 seconds for VK TURN streams (allowing time for in-app captcha solving if triggered)
+                    AndroidCoreBridge.addLog("[VKTURN] Ожидание подключения к туннелю VK TURN (до 90с для решения капчи)...")
+                    var vkConnected = false
+                    for (attempt in 0..180) {
+                        if (!isActive || isStopping.get() || !Libv2ray.isVkTurnClientRunning()) break
+                        val activeStreams = runCatching { Libv2ray.getVkTurnActiveStreams() }.getOrDefault(0)
+                        if (activeStreams > 0) {
+                            vkConnected = true
+                            break
+                        }
+                        delay(500)
+                    }
+                    if (!vkConnected && !isStopping.get()) {
+                        val lastErr = runCatching { Libv2ray.getVkTurnLastError() }.getOrNull().orEmpty()
+                        val msg = if (lastErr.isNotBlank()) lastErr else "VK TURN не смог подключиться к туннелю (таймаут)"
+                        error(msg)
+                    }
+                    AndroidCoreBridge.addLog("[VKTURN] Туннель VK TURN успешно подключен! Активных потоков: ${Libv2ray.getVkTurnActiveStreams()}")
                 } else if (profile.protocolType == ProtocolType.MASTER_DNS) {
                     localRelayPort = (20000..50000).random()
                     val raw = profile.protocolRawConfig

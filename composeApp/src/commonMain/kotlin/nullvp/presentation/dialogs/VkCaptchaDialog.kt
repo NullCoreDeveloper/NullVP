@@ -13,6 +13,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import nullvp.platform.CaptchaHelper
 import nullvp.platform.ClipboardHelper
 import nullvp.platform.UrlHelper
 import nullvp.theme.*
@@ -25,6 +26,10 @@ fun VkCaptchaDialog(
 ) {
     var token by remember { mutableStateOf("") }
     var copied by remember { mutableStateOf(false) }
+
+    LaunchedEffect(captchaUrl) {
+        CaptchaHelper.openCaptcha(captchaUrl)
+    }
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
@@ -56,24 +61,36 @@ fun VkCaptchaDialog(
                 Spacer(Modifier.height(8.dp))
 
                 Text(
-                    text = "VK TURN заблокировал сессию проверкой на робота. Откройте капчу в браузере, пройдите её и скопируйте итоговый токен или подтвердите прохождение:",
+                    text = "VK заблокировал сессию проверкой на робота. Решите капчу во встроенном окне приложения. Если окно закрылось, откройте его повторно:",
                     style = MaterialTheme.typography.bodySmall,
                     color = OnDarkSurfaceVariant
                 )
 
                 Spacer(Modifier.height(16.dp))
 
+                Button(
+                    onClick = { CaptchaHelper.openCaptcha(captchaUrl) },
+                    colors = ButtonDefaults.buttonColors(containerColor = NeonCyan, contentColor = Color.Black),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Решить капчу в приложении", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                }
+
+                Spacer(Modifier.height(8.dp))
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Button(
+                    OutlinedButton(
                         onClick = { UrlHelper.openUrl(captchaUrl) },
-                        colors = ButtonDefaults.buttonColors(containerColor = NeonCyan, contentColor = Color.Black),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = NeonCyan),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, NeonCyan.copy(alpha = 0.4f)),
                         shape = RoundedCornerShape(8.dp),
                         modifier = Modifier.weight(1f)
                     ) {
-                        Text("Открыть сайт", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("В браузере", fontSize = 12.sp)
                     }
 
                     OutlinedButton(
@@ -82,7 +99,7 @@ fun VkCaptchaDialog(
                             copied = true
                         },
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = NeonCyan),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, NeonCyan.copy(alpha = 0.6f)),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, NeonCyan.copy(alpha = 0.4f)),
                         shape = RoundedCornerShape(8.dp),
                         modifier = Modifier.weight(1f)
                     ) {
