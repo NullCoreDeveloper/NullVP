@@ -74,7 +74,8 @@ actual fun rememberQrScanner(
                     setDesiredBarcodeFormats(ScanOptions.QR_CODE)
                     setPrompt("Наведите камеру на QR-код профиля или подписки")
                     setBeepEnabled(false)
-                    setOrientationLocked(false)
+                    setOrientationLocked(true)
+                    setCaptureActivity(PortraitCaptureActivity::class.java)
                 }
                 cameraLauncher.launch(options)
             },
