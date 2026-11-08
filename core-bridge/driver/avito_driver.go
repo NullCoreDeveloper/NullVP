@@ -107,6 +107,17 @@ func (d *AvitoDriver) Start(ctx context.Context, configJson string, tunFd int, l
 	return nil
 }
 
+func (d *AvitoDriver) safeSend(data []byte) error {
+	d.mu.Lock()
+	tr := d.transport
+	running := d.running.Load()
+	d.mu.Unlock()
+	if tr == nil || !running {
+		return errors.New("avito stopped")
+	}
+	return tr.Send(data)
+}
+
 func (d *AvitoDriver) Stop() error {
 	if !d.running.Swap(false) {
 		return nil
@@ -117,17 +128,19 @@ func (d *AvitoDriver) Stop() error {
 	if d.socksLn != nil {
 		_ = d.socksLn.Close()
 	}
-	if d.transport != nil {
-		_ = d.transport.Stop()
-		d.transport = nil
-	}
 
 	d.mu.Lock()
 	for id, c := range d.activeConns {
 		_ = c.Close()
 		delete(d.activeConns, id)
 	}
+	tr := d.transport
+	d.transport = nil
 	d.mu.Unlock()
+
+	if tr != nil {
+		_ = tr.Stop()
+	}
 
 	d.connected.Store(false)
 	d.activeStreams.Store(0)
@@ -253,7 +266,7 @@ func (d *AvitoDriver) handleSocksConn(conn net.Conn) {
 	d.activeStreams.Add(1)
 
 	openFrame := Encode(nil, Frame{Type: FrameOpen, StreamID: streamID, Payload: []byte(target)})
-	if err := d.transport.Send(openFrame); err != nil {
+	if err := d.safeSend(openFrame); err != nil {
 		d.closeStream(streamID)
 		return
 	}
@@ -265,7 +278,7 @@ func (d *AvitoDriver) handleSocksConn(conn net.Conn) {
 		rn, rerr := conn.Read(pumpBuf)
 		if rn > 0 {
 			dataFrame := Encode(nil, Frame{Type: FrameData, StreamID: streamID, Payload: pumpBuf[:rn]})
-			if err := d.transport.Send(dataFrame); err != nil {
+			if err := d.safeSend(dataFrame); err != nil {
 				break
 			}
 		}
@@ -275,7 +288,7 @@ func (d *AvitoDriver) handleSocksConn(conn net.Conn) {
 	}
 
 	closeFrame := Encode(nil, Frame{Type: FrameClose, StreamID: streamID})
-	_ = d.transport.Send(closeFrame)
+	_ = d.safeSend(closeFrame)
 	d.closeStream(streamID)
 }
 
