@@ -439,29 +439,56 @@ actual object PingHelper {
     }
 
     private fun findXrayBinary(): File? {
-        val appDir = System.getProperty("app.dir") ?: System.getProperty("user.dir") ?: "."
-        val candidates = listOf(
-            File("$appDir/bin/xray"),
-            File("$appDir/lib/app/resources/bin/xray"),
-            File("./bin/xray"),
-            File("composeApp/build/compose/binaries/main/app/NullVP/bin/xray"),
-            File("/usr/bin/xray"),
-            File("/usr/local/bin/xray"),
-            File("./bin/xray")
+        val isWindows = System.getProperty("os.name").lowercase().contains("windows")
+        val exeNames = if (isWindows) listOf("xray.exe", "xray") else listOf("xray", "xray.exe")
+        val appDir = System.getProperty("compose.application.resources.dir")
+            ?: System.getProperty("app.dir")
+            ?: System.getProperty("user.dir")
+            ?: "."
+        val currentJarDir = runCatching {
+            File(PingHelper::class.java.protectionDomain.codeSource.location.toURI()).parentFile
+        }.getOrNull()
+
+        val searchDirs = listOfNotNull(
+            File(appDir, "bin"),
+            File(appDir, "lib/app/resources/bin"),
+            File(appDir),
+            currentJarDir?.let { File(it, "bin") },
+            currentJarDir,
+            File("./bin"),
+            File("composeApp/build/compose/binaries/main/app/NullVP/bin"),
+            File("/usr/bin"),
+            File("/usr/local/bin")
         )
-        return candidates.firstOrNull { it.exists() && it.canExecute() }
+
+        for (dir in searchDirs) {
+            for (binName in exeNames) {
+                val f = File(dir, binName)
+                if (f.exists() && (isWindows || f.canExecute())) {
+                    return f
+                }
+            }
+        }
+        return null
     }
 
     private fun findAssetDir(): File? {
-        val appDir = System.getProperty("app.dir") ?: System.getProperty("user.dir") ?: "."
-        val candidates = listOf(
-            File("$appDir/lib/app/resources/assets"),
-            File("$appDir/assets"),
+        val appDir = System.getProperty("compose.application.resources.dir")
+            ?: System.getProperty("app.dir")
+            ?: System.getProperty("user.dir")
+            ?: "."
+        val currentJarDir = runCatching {
+            File(PingHelper::class.java.protectionDomain.codeSource.location.toURI()).parentFile
+        }.getOrNull()
+
+        val searchDirs = listOfNotNull(
+            File(appDir, "lib/app/resources/assets"),
+            File(appDir, "assets"),
+            currentJarDir?.let { File(it, "assets") },
             File("./assets"),
-            File("composeApp/src/desktopMain/resources/assets"),
-            File("./assets")
+            File("composeApp/src/desktopMain/resources/assets")
         )
-        return candidates.firstOrNull { it.exists() && File(it, "geoip.dat").exists() }
+        return searchDirs.firstOrNull { it.exists() && File(it, "geoip.dat").exists() }
     }
 
     private fun measureIcmpPing(host: String, timeoutMs: Int): Long {

@@ -29,7 +29,17 @@ data class CustomRoutingRule(
 )
 
 @Serializable
+enum class AppTheme {
+    DARK,
+    LIGHT,
+    SYSTEM
+}
+
+@Serializable
 data class AppSettings(
+    // Theme
+    val appTheme: AppTheme = AppTheme.DARK,
+
     // Language
     val language: AppLanguage = AppLanguage.RU,
 

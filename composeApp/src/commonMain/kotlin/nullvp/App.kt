@@ -218,8 +218,8 @@ fun App() {
         else -> ConnectState.DISCONNECTED
     }
 
-    NullVpTheme {
-        BoxWithConstraints(modifier = Modifier.fillMaxSize().background(DarkBackground).safeDrawingPadding()) {
+    NullVpTheme(appTheme = settings.appTheme) {
+        BoxWithConstraints(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).safeDrawingPadding()) {
             val isWideScreen = maxWidth >= 680.dp
 
             Row(modifier = Modifier.fillMaxSize()) {
@@ -235,14 +235,14 @@ fun App() {
 
                 // Main Content Screen
                 Scaffold(
-                    containerColor = DarkBackground,
+                    containerColor = MaterialTheme.colorScheme.background,
                     contentWindowInsets = WindowInsets(0, 0, 0, 0),
                     bottomBar = {
                         // Compact Mobile Bottom Bar
                         if (!isWideScreen) {
                             NavigationBar(
-                                containerColor = DarkSurface,
-                                contentColor = OnDarkSurface,
+                                containerColor = MaterialTheme.colorScheme.surface,
+                                contentColor = MaterialTheme.colorScheme.onSurface,
                                 windowInsets = WindowInsets(0, 0, 0, 0)
                             ) {
                                 NavigationBarItem(
@@ -1254,9 +1254,9 @@ private fun NullVpSidebar(
     version: String
 ) {
     Surface(
-        color = DarkSurface,
+        color = MaterialTheme.colorScheme.surface,
         modifier = Modifier.fillMaxHeight().width(94.dp),
-        border = BorderStroke(1.dp, DarkSurfaceVariant.copy(alpha = 0.5f))
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
     ) {
         Column(
             modifier = Modifier.fillMaxSize().padding(vertical = 16.dp),
@@ -1266,12 +1266,12 @@ private fun NullVpSidebar(
                 text = "NullVP",
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.ExtraBold,
-                color = NeonCyan
+                color = MaterialTheme.colorScheme.primary
             )
             Text(
                 text = version,
                 style = MaterialTheme.typography.labelSmall,
-                color = OnDarkSurfaceVariant,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 10.sp
             )
 
@@ -1290,7 +1290,7 @@ private fun NullVpSidebar(
                 val (icon, label) = item
                 Surface(
                     shape = RoundedCornerShape(12.dp),
-                    color = if (selected) NeonCyan.copy(alpha = 0.15f) else Color.Transparent,
+                    color = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else Color.Transparent,
                     modifier = Modifier
                         .padding(horizontal = 8.dp, vertical = 4.dp)
                         .fillMaxWidth()
@@ -1303,7 +1303,7 @@ private fun NullVpSidebar(
                         Icon(
                             imageVector = icon,
                             contentDescription = label,
-                            tint = if (selected) NeonCyan else OnDarkSurfaceVariant,
+                            tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(22.dp)
                         )
                         Spacer(Modifier.height(4.dp))
@@ -1311,7 +1311,7 @@ private fun NullVpSidebar(
                             text = label,
                             fontSize = 11.sp,
                             fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                            color = if (selected) NeonCyan else OnDarkSurfaceVariant
+                            color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }

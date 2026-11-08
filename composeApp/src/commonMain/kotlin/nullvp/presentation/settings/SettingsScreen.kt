@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.style.TextOverflow
 import nullvp.data.store.AppStateStore
 import nullvp.domain.model.AppSettings
+import nullvp.domain.model.AppTheme
 import nullvp.domain.model.CustomRoutingRule
 import nullvp.domain.model.OperationMode
 
@@ -842,6 +843,34 @@ private fun UiCategorySection(settings: AppSettings, strings: AppStrings) {
                     )
                 }
             }
+
+            // Theme Selector
+            Text(
+                text = if (settings.language == AppLanguage.RU) "Тема оформления" else "App Theme",
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                listOf(
+                    AppTheme.DARK to (if (settings.language == AppLanguage.RU) "Темная" else "Dark"),
+                    AppTheme.LIGHT to (if (settings.language == AppLanguage.RU) "Светлая" else "Light"),
+                    AppTheme.SYSTEM to (if (settings.language == AppLanguage.RU) "Системная" else "System")
+                ).forEach { (theme, label) ->
+                    val selected = settings.appTheme == theme
+                    FilterChip(
+                        selected = selected,
+                        onClick = { AppStateStore.updateSettings(settings.copy(appTheme = theme)) },
+                        label = { Text(label, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f),
+                            selectedLabelColor = MaterialTheme.colorScheme.primary
+                        )
+                    )
+                }
+            }
+
+            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
 
             // Minimize to Tray (Desktop only)
             if (!AppListHelper.isAndroid()) {

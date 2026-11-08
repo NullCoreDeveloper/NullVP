@@ -47,46 +47,77 @@ class DesktopCoreEngine : CoreEngine {
     private var companionLogJob: Job? = null
 
     companion object {
-        private const val CONFIG_PATH = "/tmp/nullvp_active.json"
-        private const val DRIVER_CONFIG_PATH = "/tmp/nullvp_driver.json"
+        private val TMP_DIR = System.getProperty("java.io.tmpdir") ?: "/tmp"
+        private val CONFIG_PATH = File(TMP_DIR, "nullvp_active.json").absolutePath
+        private val DRIVER_CONFIG_PATH = File(TMP_DIR, "nullvp_driver.json").absolutePath
         private const val TUN_DEVICE = "nullvp0"
         var activeProfile: Profile? = null
         var isRunningState: Boolean = false
     }
 
     private fun findBinary(name: String): File? {
-        val appDir = System.getProperty("app.dir") ?: System.getProperty("user.dir") ?: "."
-        val candidates = listOf(
-            File("$appDir/bin/$name"),
-            File("$appDir/lib/app/resources/bin/$name"),
-            File("./bin/$name"),
-            File("composeApp/build/compose/binaries/main/app/NullVP/bin/$name"),
-            File("/usr/bin/$name"),
-            File("/usr/local/bin/$name"),
-            File("./bin/$name"),
-            File("./bin/$name")
+        val isWindows = System.getProperty("os.name").lowercase().contains("windows")
+        val exeNames = if (isWindows) listOf("$name.exe", name) else listOf(name, "$name.exe")
+        val appDir = System.getProperty("compose.application.resources.dir")
+            ?: System.getProperty("app.dir")
+            ?: System.getProperty("user.dir")
+            ?: "."
+        val currentJarDir = runCatching {
+            File(DesktopCoreEngine::class.java.protectionDomain.codeSource.location.toURI()).parentFile
+        }.getOrNull()
+
+        val searchDirs = listOfNotNull(
+            File(appDir, "bin"),
+            File(appDir, "lib/app/resources/bin"),
+            File(appDir),
+            currentJarDir?.let { File(it, "bin") },
+            currentJarDir,
+            File("./bin"),
+            File("composeApp/build/compose/binaries/main/app/NullVP/bin"),
+            File("/usr/bin"),
+            File("/usr/local/bin")
         )
-        return candidates.firstOrNull { it.exists() && it.canExecute() }
+
+        for (dir in searchDirs) {
+            for (binName in exeNames) {
+                val f = File(dir, binName)
+                if (f.exists() && (isWindows || f.canExecute())) {
+                    return f
+                }
+            }
+        }
+        return null
     }
 
     private fun findAssetDir(): File? {
-        val appDir = System.getProperty("app.dir") ?: System.getProperty("user.dir") ?: "."
-        val candidates = listOf(
-            File("$appDir/lib/app/resources/assets"),
-            File("$appDir/assets"),
+        val appDir = System.getProperty("compose.application.resources.dir")
+            ?: System.getProperty("app.dir")
+            ?: System.getProperty("user.dir")
+            ?: "."
+        val currentJarDir = runCatching {
+            File(DesktopCoreEngine::class.java.protectionDomain.codeSource.location.toURI()).parentFile
+        }.getOrNull()
+
+        val searchDirs = listOfNotNull(
+            File(appDir, "lib/app/resources/assets"),
+            File(appDir, "assets"),
+            currentJarDir?.let { File(it, "assets") },
             File("./assets"),
-            File("composeApp/src/desktopMain/resources/assets"),
-            File("./assets"),
-            File("./assets")
+            File("composeApp/src/desktopMain/resources/assets")
         )
-        return candidates.firstOrNull { it.exists() && File(it, "geoip.dat").exists() }
+        return searchDirs.firstOrNull { it.exists() && File(it, "geoip.dat").exists() }
     }
 
     private fun killExistingZombieProcesses() {
+        val isWindows = System.getProperty("os.name").lowercase().contains("windows")
         runCatching {
-            ProcessBuilder("pkill", "-9", "-f", "xray.*$CONFIG_PATH").start().waitFor(500, TimeUnit.MILLISECONDS)
-            ProcessBuilder("pkill", "-9", "-f", "tun2socks.*$TUN_DEVICE").start().waitFor(500, TimeUnit.MILLISECONDS)
-            ProcessBuilder("pkill", "-9", "-f", "nullvp-core.*").start().waitFor(500, TimeUnit.MILLISECONDS)
+            if (isWindows) {
+                ProcessBuilder("taskkill", "/F", "/IM", "xray.exe", "/IM", "tun2socks.exe", "/IM", "nullvp-core.exe").start().waitFor(500, TimeUnit.MILLISECONDS)
+            } else {
+                ProcessBuilder("pkill", "-9", "-f", "xray.*nullvp_active.json").start().waitFor(500, TimeUnit.MILLISECONDS)
+                ProcessBuilder("pkill", "-9", "-f", "tun2socks.*$TUN_DEVICE").start().waitFor(500, TimeUnit.MILLISECONDS)
+                ProcessBuilder("pkill", "-9", "-f", "nullvp-core.*").start().waitFor(500, TimeUnit.MILLISECONDS)
+            }
         }
     }
 
@@ -342,39 +373,70 @@ class DesktopCoreEngine : CoreEngine {
             return
         }
 
+        val isWindows = System.getProperty("os.name").lowercase().contains("windows")
+
         scope.launch(Dispatchers.IO) {
             try {
-                appendLog("[TUN] Starting tun2socks on device $TUN_DEVICE...")
-                AppStateStore.addLog(LogLevel.INFO, "TUN", "Initializing virtual interface $TUN_DEVICE via tun2socks")
+                val devName = if (isWindows) "NullVP" else TUN_DEVICE
+                appendLog("[TUN] Starting tun2socks on device $devName...")
+                AppStateStore.addLog(LogLevel.INFO, "TUN", "Initializing virtual interface $devName via tun2socks")
 
-                val tunPb = ProcessBuilder(
-                    tunBinary.absolutePath,
-                    "-device", TUN_DEVICE,
-                    "-proxy", "socks5://127.0.0.1:$socksPort",
-                    "-loglevel", "info"
-                )
+                val tunArgs = if (isWindows) {
+                    listOf(
+                        tunBinary.absolutePath,
+                        "-device", "wintun",
+                        "-interface", "NullVP",
+                        "-proxy", "socks5://127.0.0.1:$socksPort",
+                        "-loglevel", "info"
+                    )
+                } else {
+                    listOf(
+                        tunBinary.absolutePath,
+                        "-device", TUN_DEVICE,
+                        "-proxy", "socks5://127.0.0.1:$socksPort",
+                        "-loglevel", "info"
+                    )
+                }
+
+                val tunPb = ProcessBuilder(tunArgs)
+                tunBinary.parentFile?.let { tunPb.directory(it) }
                 tunPb.redirectErrorStream(true)
                 val p = tunPb.start()
                 tunProcess = p
 
-                delay(800)
+                delay(1000)
 
-                // Configure interface via ip command (supports cached session sudo or direct cap_net_admin)
-                runCatching {
-                    val pass = DesktopPrivilegeManager.cachedSudoPassword
-                    if (!pass.isNullOrBlank()) {
-                        val pb1 = ProcessBuilder("sudo", "-S", "ip", "addr", "add", "198.18.0.1/15", "dev", TUN_DEVICE)
-                        val p1 = pb1.start()
-                        p1.outputStream.bufferedWriter().use { it.write(pass); it.newLine(); it.flush() }
-                        p1.waitFor()
+                if (isWindows) {
+                    // OpenFlux style Wintun interface configuration via netsh
+                    runCatching {
+                        appendLog("[TUN] Configuring Windows Wintun routes (0.0.0.0/1, 128.0.0.0/1)...")
+                        ProcessBuilder("netsh", "interface", "ipv4", "set", "address", "name=NullVP", "source=static", "address=10.10.10.2", "mask=255.255.255.0", "store=active").start().waitFor()
+                        ProcessBuilder("netsh", "interface", "ipv4", "set", "subinterface", "NullVP", "mtu=1500", "store=active").start().waitFor()
+                        ProcessBuilder("netsh", "interface", "ipv4", "set", "interface", "NullVP", "metric=1").start().waitFor()
+                        ProcessBuilder("netsh", "interface", "ipv4", "add", "route", "prefix=0.0.0.0/1", "interface=NullVP", "nexthop=10.10.10.1", "metric=1", "store=active").start().waitFor()
+                        ProcessBuilder("netsh", "interface", "ipv4", "add", "route", "prefix=128.0.0.0/1", "interface=NullVP", "nexthop=10.10.10.1", "metric=1", "store=active").start().waitFor()
+                        ProcessBuilder("netsh", "interface", "ipv6", "add", "route", "prefix=::/1", "interface=NullVP", "metric=1", "store=active").start().waitFor()
+                        ProcessBuilder("netsh", "interface", "ipv6", "add", "route", "prefix=8000::/1", "interface=NullVP", "metric=1", "store=active").start().waitFor()
+                        appendLog("[TUN] Windows Wintun routes established successfully")
+                    }
+                } else {
+                    // Configure interface via ip command (supports cached session sudo or direct cap_net_admin)
+                    runCatching {
+                        val pass = DesktopPrivilegeManager.cachedSudoPassword
+                        if (!pass.isNullOrBlank()) {
+                            val pb1 = ProcessBuilder("sudo", "-S", "ip", "addr", "add", "198.18.0.1/15", "dev", TUN_DEVICE)
+                            val p1 = pb1.start()
+                            p1.outputStream.bufferedWriter().use { it.write(pass); it.newLine(); it.flush() }
+                            p1.waitFor()
 
-                        val pb2 = ProcessBuilder("sudo", "-S", "ip", "link", "set", "dev", TUN_DEVICE, "up")
-                        val p2 = pb2.start()
-                        p2.outputStream.bufferedWriter().use { it.write(pass); it.newLine(); it.flush() }
-                        p2.waitFor()
-                    } else {
-                        ProcessBuilder("ip", "addr", "add", "198.18.0.1/15", "dev", TUN_DEVICE).start().waitFor()
-                        ProcessBuilder("ip", "link", "set", "dev", TUN_DEVICE, "up").start().waitFor()
+                            val pb2 = ProcessBuilder("sudo", "-S", "ip", "link", "set", "dev", TUN_DEVICE, "up")
+                            val p2 = pb2.start()
+                            p2.outputStream.bufferedWriter().use { it.write(pass); it.newLine(); it.flush() }
+                            p2.waitFor()
+                        } else {
+                            ProcessBuilder("ip", "addr", "add", "198.18.0.1/15", "dev", TUN_DEVICE).start().waitFor()
+                            ProcessBuilder("ip", "link", "set", "dev", TUN_DEVICE, "up").start().waitFor()
+                        }
                     }
                 }
 
