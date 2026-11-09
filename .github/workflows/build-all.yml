@@ -32,8 +32,13 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Accept Android SDK Licenses
+        run: |
+          if [ -d "$ANDROID_HOME/cmdline-tools/latest/bin" ]; then
+            yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
+          elif command -v sdkmanager >/dev/null 2>&1; then
+            yes | sdkmanager --licenses || true
+          fi
 
       - name: Setup Signing Keystore
         id: sign_setup
@@ -104,8 +109,9 @@ jobs:
           unzip -q -o xray.zip xray -d bin/
           rm -f xray.zip
           curl -L -o tun2socks.zip "https://github.com/xjasonlyu/tun2socks/releases/download/v2.5.2/tun2socks-linux-amd64.zip"
-          unzip -q -o tun2socks.zip build/tun2socks-linux-amd64 -d /tmp/
-          mv /tmp/build/tun2socks-linux-amd64 bin/tun2socks
+          unzip -q -o tun2socks.zip tun2socks-linux-amd64 -d bin/
+          mv bin/tun2socks-linux-amd64 bin/tun2socks
+          rm -f tun2socks.zip
           chmod +x bin/*
 
       - name: Build Linux DEB & AppImage
@@ -157,7 +163,7 @@ jobs:
           Copy-Item "xray_tmp/xray.exe" -Destination "bin/xray.exe"
           Invoke-WebRequest -Uri "https://github.com/xjasonlyu/tun2socks/releases/download/v2.5.2/tun2socks-windows-amd64.zip" -OutFile "tun2socks.zip"
           Expand-Archive -Path "tun2socks.zip" -DestinationPath "tun_tmp"
-          Copy-Item "tun_tmp/build/tun2socks-windows-amd64.exe" -Destination "bin/tun2socks.exe"
+          Copy-Item "tun_tmp/tun2socks-windows-amd64.exe" -Destination "bin/tun2socks.exe"
           Invoke-WebRequest -Uri "https://www.wintun.net/builds/wintun-0.14.1.zip" -OutFile "wintun.zip"
           Expand-Archive -Path "wintun.zip" -DestinationPath "wintun_tmp"
           Copy-Item "wintun_tmp/wintun/bin/amd64/wintun.dll" -Destination "bin/wintun.dll"

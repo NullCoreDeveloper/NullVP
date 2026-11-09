@@ -153,7 +153,13 @@ compose.desktop {
 
         nativeDistributions {
             modules("java.base", "java.desktop", "java.logging", "java.net.http", "java.sql", "jdk.unsupported")
-            targetFormats(TargetFormat.AppImage, TargetFormat.Deb, TargetFormat.Msi, TargetFormat.Dmg)
+            val osName = System.getProperty("os.name").lowercase()
+            when {
+                osName.contains("linux") -> targetFormats(TargetFormat.AppImage, TargetFormat.Deb)
+                osName.contains("windows") -> targetFormats(TargetFormat.Msi)
+                osName.contains("mac") -> targetFormats(TargetFormat.Dmg)
+                else -> targetFormats()
+            }
             packageName = "NullVP"
             packageVersion = appVersion
             description = "NullVP Cross-Platform Modern VPN Client"
