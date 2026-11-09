@@ -9,6 +9,7 @@
   <img src="https://img.shields.io/badge/UI-Compose%20Multiplatform-purple?style=flat-square" alt="Compose Multiplatform" />
   <img src="https://img.shields.io/badge/Core-Go%20%2B%20Xray%20%2B%20Wintun-00ADD8?style=flat-square" alt="Core" />
   <img src="https://img.shields.io/badge/License-Apache%202.0-green?style=flat-square" alt="License" />
+  <img src="https://komarev.com/ghpvc/?username=NullCoreDeveloper-NullVP&label=Views&color=00ADD8&style=flat-square" alt="Views" />
 </p>
 
 ---

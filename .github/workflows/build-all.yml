@@ -133,24 +133,9 @@ jobs:
             # 2. Standalone AppImage
             cp -f composeApp/src/desktopMain/resources/icon.png "$DIST_DIR/NullVP.png"
 
-            cat << 'EOF' > "$DIST_DIR/NullVP.desktop"
-[Desktop Entry]
-Type=Application
-Name=NullVP
-Comment=NullVP Cross-Platform Modern VPN Client
-Exec=NullVP
-Icon=NullVP
-Categories=Network;
-Terminal=false
-EOF
+            printf '[Desktop Entry]\nType=Application\nName=NullVP\nComment=NullVP Cross-Platform Modern VPN Client\nExec=NullVP\nIcon=NullVP\nCategories=Network;\nTerminal=false\n' > "$DIST_DIR/NullVP.desktop"
 
-            cat << 'EOF' > "$DIST_DIR/AppRun"
-#!/bin/bash
-HERE="$(dirname "$(readlink -f "${0}")")"
-export PATH="${HERE}/bin:${PATH}"
-cd "${HERE}"
-exec "${HERE}/bin/NullVP" "$@"
-EOF
+            printf '#!/bin/bash\nHERE="$(dirname "$(readlink -f "${0}")")"\nexport PATH="${HERE}/bin:${PATH}"\ncd "${HERE}"\nexec "${HERE}/bin/NullVP" "$@"\n' > "$DIST_DIR/AppRun"
             chmod +x "$DIST_DIR/AppRun"
 
             curl -sL "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage" -o /tmp/appimagetool
