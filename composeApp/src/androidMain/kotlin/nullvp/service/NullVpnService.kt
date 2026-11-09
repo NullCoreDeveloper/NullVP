@@ -102,15 +102,22 @@ class NullVpnService : VpnService() {
             Libv2ray.initCoreEnv(assetDir.absolutePath, deviceId)
 
             Libv2ray.setCaptchaHandler(object : libv2ray.CaptchaHandler {
+                private var lastOpenTime = 0L
+
                 override fun openCaptcha(url: String?) {
-                    if (!url.isNullOrBlank()) {
-                        AndroidCoreBridge.setCaptchaUrl(url)
-                        AndroidCoreBridge.addLog("[CAPTCHA] Отображение капчи внутри приложения: $url")
-                        try {
-                            nullvp.ui.CaptchaActivity.start(applicationContext, url)
-                        } catch (e: Exception) {
-                            AndroidCoreBridge.addLog("[CAPTCHA] Ошибка запуска CaptchaActivity: ${e.message}")
-                        }
+                    if (url.isNullOrBlank()) return
+                    val now = System.currentTimeMillis()
+                    if (now - lastOpenTime < 10000L || nullvp.ui.CaptchaActivity.isCurrentlyActive) {
+                        AndroidCoreBridge.addLog("[CAPTCHA] Пропуск повторной капчи (активна или кулдаун 10с)")
+                        return
+                    }
+                    lastOpenTime = now
+                    AndroidCoreBridge.setCaptchaUrl(url)
+                    AndroidCoreBridge.addLog("[CAPTCHA] Отображение капчи внутри приложения: $url")
+                    try {
+                        nullvp.ui.CaptchaActivity.start(applicationContext, url)
+                    } catch (e: Exception) {
+                        AndroidCoreBridge.addLog("[CAPTCHA] Ошибка запуска CaptchaActivity: ${e.message}")
                     }
                 }
             })

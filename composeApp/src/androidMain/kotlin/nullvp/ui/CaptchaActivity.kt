@@ -44,6 +44,7 @@ class CaptchaActivity : Activity() {
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        isCurrentlyActive = true
 
         val rootLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -54,11 +55,17 @@ class CaptchaActivity : Activity() {
             )
         }
 
+        // Calculate system status bar height so the header & exit button are never under the status bar/notch
+        val statusBarHeight = run {
+            val resId = resources.getIdentifier("status_bar_height", "dimen", "android")
+            if (resId > 0) resources.getDimensionPixelSize(resId) else dpToPx(32)
+        }
+
         // 1. Cyberpunk Header Bar
         val header = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             setBackgroundColor(Color.parseColor("#0F172A"))
-            setPadding(dpToPx(16), dpToPx(14), dpToPx(16), dpToPx(14))
+            setPadding(dpToPx(16), statusBarHeight + dpToPx(8), dpToPx(16), dpToPx(12))
             gravity = Gravity.CENTER_VERTICAL
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -66,11 +73,24 @@ class CaptchaActivity : Activity() {
             )
         }
 
+        // Dynamically adjust padding if WindowInsets are available
+        window.decorView.setOnApplyWindowInsetsListener { _, insets ->
+            val topInset = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                insets.getInsets(android.view.WindowInsets.Type.statusBars()).top
+            } else {
+                insets.systemWindowInsetTop
+            }
+            if (topInset > 0) {
+                header.setPadding(dpToPx(16), topInset + dpToPx(8), dpToPx(16), dpToPx(12))
+            }
+            insets
+        }
+
         val backButton = TextView(this).apply {
             text = "✕"
-            textSize = 20f
+            textSize = 22f
             setTextColor(Color.parseColor("#94A3B8"))
-            setPadding(0, 0, dpToPx(16), 0)
+            setPadding(dpToPx(8), dpToPx(8), dpToPx(16), dpToPx(8))
             setOnClickListener { finish() }
         }
 
@@ -314,7 +334,13 @@ class CaptchaActivity : Activity() {
         }
 
         Toast.makeText(applicationContext, "Капча VK пройдена! Подключение...", Toast.LENGTH_SHORT).show()
+        isCurrentlyActive = false
         Handler(Looper.getMainLooper()).postDelayed({ finish() }, 500)
+    }
+
+    override fun onDestroy() {
+        isCurrentlyActive = false
+        super.onDestroy()
     }
 
     override fun onBackPressed() {
@@ -330,10 +356,14 @@ class CaptchaActivity : Activity() {
     }
 
     companion object {
+        @Volatile
+        var isCurrentlyActive = false
+
         fun start(context: Context, url: String) {
+            if (isCurrentlyActive) return
             val intent = Intent(context, CaptchaActivity::class.java).apply {
                 putExtra("url", url)
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
             }
             context.startActivity(intent)
         }

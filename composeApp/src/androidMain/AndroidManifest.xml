@@ -68,6 +68,7 @@
         <activity
             android:name="nullvp.ui.CaptchaActivity"
             android:exported="false"
+            android:launchMode="singleTask"
             android:screenOrientation="portrait"
             android:theme="@android:style/Theme.Material.NoActionBar" />
 
