@@ -189,7 +189,7 @@ class NullVpnService : VpnService() {
                         }
                     }
 
-                    // 2. Split Tunneling & Dynamic App Scanner (v2whitelist logic)
+                    // 2. Split Tunneling & Dynamic App Scanner
                     applySplitTunneling(builder)
 
                     // Close previous interface if open
@@ -472,7 +472,7 @@ class NullVpnService : VpnService() {
             }
         }
 
-        // 2. Dynamic Russian Apps Scanner (from v2whitelist)
+        // 2. Dynamic Russian Apps Scanner
         // Manual configuration has higher priority over dynamic:
         // If user enabled Per-App Proxy, manual selection defines which apps are bypassed!
         // If Per-App Proxy is disabled, dynamic scanner acts automatically on RU services.

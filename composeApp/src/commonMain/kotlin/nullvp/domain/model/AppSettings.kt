@@ -14,7 +14,7 @@ enum class OperationMode {
 enum class RoutingStrategy {
     BYPASS_LAN_AND_RU, // Smart bypass of RU and LAN via geosite & geoip
     GLOBAL,            // Route everything through proxy
-    SMART_WHITELIST,   // Proxy only blocked resources (v2whitelist approach)
+    SMART_WHITELIST,   // Proxy only blocked resources (anti-censorship whitelist)
     CUSTOM             // Fully custom user rules
 }
 
