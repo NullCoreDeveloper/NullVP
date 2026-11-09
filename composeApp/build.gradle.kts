@@ -1,5 +1,24 @@
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 
+val rawAppVersion = providers.gradleProperty("appVersion")
+    .orElse(providers.environmentVariable("APP_VERSION"))
+    .getOrElse("1.0.0")
+    .removePrefix("v")
+
+val appVersion = if (rawAppVersion.isBlank()) "1.0.0" else rawAppVersion
+
+val appVersionCode = providers.gradleProperty("appVersionCode")
+    .orElse(providers.environmentVariable("APP_VERSION_CODE"))
+    .map { it.toIntOrNull() ?: 1 }
+    .getOrElse(run {
+        runCatching {
+            val parts = appVersion.split('.').mapNotNull { it.toIntOrNull() }
+            if (parts.size >= 3) parts[0] * 10000 + parts[1] * 100 + parts[2]
+            else if (parts.size == 2) parts[0] * 10000 + parts[1] * 100
+            else parts.firstOrNull() ?: 1
+        }.getOrDefault(1)
+    })
+
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
     alias(libs.plugins.androidApplication)
@@ -83,8 +102,8 @@ android {
         applicationId = "org.nullvp.client"
         minSdk = 24
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = appVersionCode
+        versionName = appVersion
     }
 
     signingConfigs {
@@ -136,7 +155,7 @@ compose.desktop {
             modules("java.base", "java.desktop", "java.logging", "java.net.http", "java.sql", "jdk.unsupported")
             targetFormats(TargetFormat.AppImage, TargetFormat.Deb, TargetFormat.Msi, TargetFormat.Dmg)
             packageName = "NullVP"
-            packageVersion = "1.0.0"
+            packageVersion = appVersion
             description = "NullVP Cross-Platform Modern VPN Client"
             copyright = "© 2026 NullVP Project"
             vendor = "NullVP"
