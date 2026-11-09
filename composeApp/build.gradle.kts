@@ -166,14 +166,18 @@ compose.desktop {
             copyright = "© 2026 NullVP Project"
             vendor = "NullVP"
 
+            val iconPng = project.file("src/desktopMain/resources/icon.png")
+            val iconIco = project.file("src/desktopMain/resources/icon.ico")
+            val iconIcns = project.file("src/desktopMain/resources/icon.icns")
+
             linux {
-                iconFile.set(project.file("src/desktopMain/resources/icon.png"))
+                if (iconPng.exists()) iconFile.set(iconPng)
             }
             windows {
-                iconFile.set(project.file("src/desktopMain/resources/icon.ico"))
+                if (iconIco.exists()) iconFile.set(iconIco)
             }
             macOS {
-                iconFile.set(project.file("src/desktopMain/resources/icon.icns"))
+                if (iconIcns.exists()) iconFile.set(iconIcns)
             }
         }
     }
