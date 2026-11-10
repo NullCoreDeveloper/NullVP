@@ -37,12 +37,12 @@ object RealXrayConfigBuilder {
 
             // 3. Inbounds (Mixed SOCKS5/HTTP on socksPort + HTTP on httpPort + API on 10085)
             putJsonArray("inbounds") {
-                // SOCKS5 / Mixed Inbound
+                // SOCKS5 Inbound
                 addJsonObject {
                     put("tag", "socks-in")
                     put("port", settings.socksPort)
                     put("listen", if (settings.allowLan) "0.0.0.0" else "127.0.0.1")
-                    put("protocol", "mixed")
+                    put("protocol", "socks")
                     putJsonObject("settings") {
                         if (settings.proxyAuthEnabled && settings.proxyUsername.isNotBlank()) {
                             put("auth", "password")
@@ -75,7 +75,7 @@ object RealXrayConfigBuilder {
                     put("tag", "http-in")
                     put("port", settings.httpPort)
                     put("listen", if (settings.allowLan) "0.0.0.0" else "127.0.0.1")
-                    put("protocol", "mixed")
+                    put("protocol", "http")
                     putJsonObject("settings") {
                         if (settings.proxyAuthEnabled && settings.proxyUsername.isNotBlank()) {
                             putJsonArray("accounts") {
