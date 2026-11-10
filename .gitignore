@@ -14,15 +14,13 @@ captures/
 *.AppImage
 *.dat
 dist/
-/bin/
-/*/bin/
 keystore.properties
 *.jks
 *.keystore
 
-# Go artifacts
+# Internal build folders (root /bin/ is tracked for custom core binaries)
+/composeApp/bin/
 /core-bridge/bin/
-/*/bin/
 /core-bridge/dist/
 /core-bridge/*.aar
 /core-bridge/*.jar

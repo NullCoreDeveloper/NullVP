@@ -102,21 +102,27 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Fetch Core Binaries (Xray & tun2socks)
+      - name: Prepare Linux Core Binaries (Custom Xray, nullvp-core, tun2socks)
         run: |
           mkdir -p bin
-          curl -L -o xray.zip "https://github.com/XTLS/Xray-core/releases/download/v1.8.24/Xray-linux-64.zip"
-          unzip -q -o xray.zip xray -d bin/
-          rm -f xray.zip
-          curl -L -o tun2socks.zip "https://github.com/xjasonlyu/tun2socks/releases/download/v2.5.2/tun2socks-linux-amd64.zip"
-          unzip -q -o tun2socks.zip tun2socks-linux-amd64 -d bin/
-          mv bin/tun2socks-linux-amd64 bin/tun2socks
-          rm -f tun2socks.zip
+          if [ ! -f "bin/xray" ]; then
+            GOBIN=$(pwd)/bin go install -ldflags="-s -w" github.com/xtls/xray-core/main@5ca6f4b7d4dc
+            mv bin/main bin/xray
+          fi
+          if [ ! -f "bin/nullvp-core" ]; then
+            cd core-bridge && go build -trimpath -ldflags="-s -w" -o ../bin/nullvp-core ./cmd/main.go && cd ..
+          fi
+          if [ ! -f "bin/tun2socks" ]; then
+            curl -sL -o tun2socks.zip "https://github.com/xjasonlyu/tun2socks/releases/download/v2.5.2/tun2socks-linux-amd64.zip"
+            unzip -q -o tun2socks.zip tun2socks-linux-amd64 -d bin/
+            mv bin/tun2socks-linux-amd64 bin/tun2socks
+            rm -f tun2socks.zip
+          fi
           chmod +x bin/*
 
-      - name: Build Linux DEB & Distributable
+      - name: Build Linux Distributable
         run: |
-          ./gradlew :composeApp:packageDeb :composeApp:createDistributable -PappVersion=${{ env.APP_VERSION }} --no-daemon -x test
+          ./gradlew :composeApp:createDistributable -PappVersion=${{ env.APP_VERSION }} --no-daemon -x test
 
       - name: Package Linux Artifacts (DEB, Portable, AppImage)
         run: |
@@ -124,8 +130,13 @@ jobs:
           DIST_DIR="composeApp/build/compose/binaries/main/app/NullVP"
           if [ -d "$DIST_DIR" ]; then
             mkdir -p "$DIST_DIR/bin"
-            cp -f bin/xray "$DIST_DIR/bin/" 2>/dev/null || true
-            cp -f bin/tun2socks "$DIST_DIR/bin/" 2>/dev/null || true
+            cp -f bin/xray "$DIST_DIR/bin/"
+            cp -f bin/tun2socks "$DIST_DIR/bin/"
+            cp -f bin/nullvp-core "$DIST_DIR/bin/" 2>/dev/null || true
+            chmod +x "$DIST_DIR/bin"/*
+
+            mkdir -p "$DIST_DIR/assets"
+            cp -f composeApp/src/desktopMain/resources/assets/*.dat "$DIST_DIR/assets/" 2>/dev/null || true
 
             # 1. Portable tar.gz
             tar -czf "output/NullVP-${{ env.RELEASE_TAG }}-linux-x86_64-portable.tar.gz" -C composeApp/build/compose/binaries/main/app NullVP
@@ -135,7 +146,7 @@ jobs:
 
             printf '[Desktop Entry]\nType=Application\nName=NullVP\nComment=NullVP Cross-Platform Modern VPN Client\nExec=NullVP\nIcon=NullVP\nCategories=Network;\nTerminal=false\n' > "$DIST_DIR/NullVP.desktop"
 
-            printf '#!/bin/bash\nHERE="$(dirname "$(readlink -f "${0}")")"\nexport PATH="${HERE}/bin:${PATH}"\ncd "${HERE}"\nexec "${HERE}/bin/NullVP" "$@"\n' > "$DIST_DIR/AppRun"
+            printf '#!/bin/bash\nHERE="$(dirname "$(readlink -f "${0}")")"\nexport APPDIR="${APPDIR:-$HERE}"\nexport PATH="${HERE}/bin:${PATH}"\ncd "${HERE}"\nexec "${HERE}/bin/NullVP" "$@"\n' > "$DIST_DIR/AppRun"
             chmod +x "$DIST_DIR/AppRun"
 
             curl -sL "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage" -o /tmp/appimagetool
@@ -143,11 +154,27 @@ jobs:
             curl -sL "https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-x86_64" -o /tmp/runtime-x86_64
 
             ARCH=x86_64 /tmp/appimagetool --appimage-extract-and-run --runtime-file /tmp/runtime-x86_64 "$DIST_DIR" "output/NullVP-${{ env.RELEASE_TAG }}-linux-x86_64.AppImage"
-          fi
 
-          # 3. DEB Package
-          DEB=$(find composeApp/build/compose/binaries/main/deb -name "*.deb" 2>/dev/null | head -n 1)
-          if [ -n "$DEB" ]; then cp "$DEB" "output/NullVP-${{ env.RELEASE_TAG }}-amd64.deb"; fi
+            # 3. Clean Standard DEB Package with all binaries included
+            DEB_BUILD="/tmp/nullvp-deb-pkg"
+            rm -rf "$DEB_BUILD"
+            mkdir -p "$DEB_BUILD/opt/NullVP"
+            mkdir -p "$DEB_BUILD/usr/bin"
+            mkdir -p "$DEB_BUILD/usr/share/applications"
+            mkdir -p "$DEB_BUILD/usr/share/pixmaps"
+            mkdir -p "$DEB_BUILD/DEBIAN"
+
+            cp -a "$DIST_DIR"/* "$DEB_BUILD/opt/NullVP/"
+            ln -sf /opt/NullVP/bin/NullVP "$DEB_BUILD/usr/bin/nullvp"
+            cp -f composeApp/src/desktopMain/resources/icon.png "$DEB_BUILD/usr/share/pixmaps/nullvp.png"
+
+            printf '[Desktop Entry]\nType=Application\nName=NullVP\nExec=/opt/NullVP/bin/NullVP %%u\nIcon=nullvp\nCategories=Network;VPN;\nTerminal=false\nComment=NullVP Cross-Platform Modern VPN Client\n' > "$DEB_BUILD/usr/share/applications/nullvp.desktop"
+
+            PKG_VER=$(echo "${{ env.RELEASE_TAG }}" | sed 's/^v//')
+            printf 'Package: nullvp\nVersion: %s\nSection: net\nPriority: optional\nArchitecture: amd64\nMaintainer: NullCoreDeveloper\nDescription: NullVP Cross-Platform Modern VPN Client\n' "$PKG_VER" > "$DEB_BUILD/DEBIAN/control"
+
+            dpkg-deb --build "$DEB_BUILD" "output/NullVP-${{ env.RELEASE_TAG }}-amd64.deb"
+          fi
 
       - name: Upload Linux Artifacts
         uses: actions/upload-artifact@v4
@@ -168,19 +195,22 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Fetch Windows Core Binaries (Xray, tun2socks, wintun)
+      - name: Prepare Windows Core Binaries (Custom Xray, nullvp-core, tun2socks, wintun)
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path "bin"
-          Invoke-WebRequest -Uri "https://github.com/XTLS/Xray-core/releases/download/v1.8.24/Xray-windows-64.zip" -OutFile "xray.zip"
-          Expand-Archive -Path "xray.zip" -DestinationPath "xray_tmp"
-          Copy-Item "xray_tmp/xray.exe" -Destination "bin/xray.exe"
-          Invoke-WebRequest -Uri "https://github.com/xjasonlyu/tun2socks/releases/download/v2.5.2/tun2socks-windows-amd64.zip" -OutFile "tun2socks.zip"
-          Expand-Archive -Path "tun2socks.zip" -DestinationPath "tun_tmp"
-          Copy-Item "tun_tmp/tun2socks-windows-amd64.exe" -Destination "bin/tun2socks.exe"
-          Invoke-WebRequest -Uri "https://www.wintun.net/builds/wintun-0.14.1.zip" -OutFile "wintun.zip"
-          Expand-Archive -Path "wintun.zip" -DestinationPath "wintun_tmp"
-          Copy-Item "wintun_tmp/wintun/bin/amd64/wintun.dll" -Destination "bin/wintun.dll"
+          if (-not (Test-Path "bin/tun2socks.exe")) {
+            Invoke-WebRequest -Uri "https://github.com/xjasonlyu/tun2socks/releases/download/v2.5.2/tun2socks-windows-amd64.zip" -OutFile "tun2socks.zip"
+            Expand-Archive -Path "tun2socks.zip" -DestinationPath "tun_tmp"
+            Copy-Item "tun_tmp/tun2socks-windows-amd64.exe" -Destination "bin/tun2socks.exe"
+            Remove-Item -Force "tun2socks.zip"
+          }
+          if (-not (Test-Path "bin/wintun.dll")) {
+            Invoke-WebRequest -Uri "https://www.wintun.net/builds/wintun-0.14.1.zip" -OutFile "wintun.zip"
+            Expand-Archive -Path "wintun.zip" -DestinationPath "wintun_tmp"
+            Copy-Item "wintun_tmp/wintun/bin/amd64/wintun.dll" -Destination "bin/wintun.dll"
+            Remove-Item -Force "wintun.zip"
+          }
 
       - name: Build Windows MSI & Distributable
         shell: cmd
@@ -195,14 +225,17 @@ jobs:
           $msi = Get-ChildItem -Path "composeApp/build/compose/binaries/main/msi" -Filter "*.msi" -Recurse | Select-Object -First 1
           if ($msi) { Copy-Item $msi.FullName -Destination "output/NullVP-${{ env.RELEASE_TAG }}-setup.msi" }
 
-          # Portable Package (includes bundled JRE, Xray, tun2socks, and wintun.dll)
+          # Portable Package (includes bundled JRE, Xray, nullvp-core, tun2socks, and wintun.dll)
           $dist = "composeApp/build/compose/binaries/main/app/NullVP"
           if (Test-Path $dist) {
             New-Item -ItemType Directory -Force -Path "$dist/bin"
             Copy-Item "bin/xray.exe" -Destination "$dist/bin/xray.exe" -ErrorAction SilentlyContinue
+            Copy-Item "bin/nullvp-core.exe" -Destination "$dist/bin/nullvp-core.exe" -ErrorAction SilentlyContinue
             Copy-Item "bin/tun2socks.exe" -Destination "$dist/bin/tun2socks.exe" -ErrorAction SilentlyContinue
             Copy-Item "bin/wintun.dll" -Destination "$dist/bin/wintun.dll" -ErrorAction SilentlyContinue
             Copy-Item "bin/wintun.dll" -Destination "$dist/wintun.dll" -ErrorAction SilentlyContinue
+            New-Item -ItemType Directory -Force -Path "$dist/assets"
+            Copy-Item "composeApp/src/desktopMain/resources/assets/*.dat" -Destination "$dist/assets/" -ErrorAction SilentlyContinue
             Compress-Archive -Path "$dist\*" -DestinationPath "output/NullVP-${{ env.RELEASE_TAG }}-windows-x64-portable.zip"
           }
 
